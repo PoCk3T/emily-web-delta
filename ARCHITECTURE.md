@@ -59,6 +59,32 @@ Firecrawl's monitoring service handles the heavy lifting — scheduled scraping,
 ### Core Problem
 Web pages change constantly — prices, stock status, content, layout, terms of service, job listings, news articles, pricing pages, regulatory filings. Users need to know **when** changes happen, **what** changed, and **how significant** the change is.
 
+### Default Monitoring Configuration — AI Service Legal Pages
+
+The initial deployment ships with a curated default list of terms, privacy policies, and acceptable use policies for the three dominant AI services. These are user-impacting legal documents that change periodically and should be monitored for any modifications:
+
+**ChatGPT (OpenAI)**
+| # | Document | URL |
+|---|----------|-----|
+| 1 | Terms of Use | `https://openai.com/policies/terms-of-use/` |
+| 2 | Privacy Policy | `https://openai.com/policies/privacy-policy/` |
+
+**Claude (Anthropic)**
+| # | Document | URL |
+|---|----------|-----|
+| 3 | Consumer Terms of Service | `https://www.anthropic.com/legal/consumer-terms` |
+| 4 | Privacy Policy | `https://www.anthropic.com/legal/privacy` |
+| 5 | Commercial Terms of Service | `https://www.anthropic.com/legal/commercial-terms` |
+
+**Gemini (Google)**
+| # | Document | URL |
+|---|----------|-----|
+| 6 | Gemini API Terms | `https://ai.google.dev/gemini-api/terms` |
+| 7 | Google Terms of Service | `https://policies.google.com/terms` |
+| 8 | Google Privacy Policy | `https://policies.google.com/privacy` |
+
+These 8 URLs are pre-loaded into the database on first startup. Users can add, remove, or modify this list through the web UI or API at any time.
+
 ### Primary Use Cases
 
 1. **Price Monitoring:** Track e-commerce product prices, detect drops, restock alerts
@@ -1044,6 +1070,250 @@ Justification:
   }
 }
 ```
+
+### 12.3 Fetch Failure Detection & UI Status Flags
+
+When a monitored URL starts returning errors (4xx/5xx responses, timeouts, DNS failures, SSL errors), the system must detect this immediately and surface it to the user inside the web UI. This is critical because a URL that consistently fails could mean the page was deleted, moved, or blocked — and the user needs to know before they assume "no changes" means "nothing changed."
+
+**Failure detection pipeline:**
+
+```
+URL Polling
+    │
+    ├─ HTTP 200 → extract content → compare hash → (if changed) notify
+    │
+    ├─ HTTP 404 → mark URL as "DELETED" → notify user → stop polling
+    │
+    ├─ HTTP 4xx (non-404) → increment error counter → mark as "ERRORING" → notify after N failures
+    │
+    ├─ HTTP 5xx → increment error counter → mark as "DOWN" → notify after N failures
+    │
+    ├─ Timeout (>30s) → increment error counter → mark as "TIMEOUT" → notify after N failures
+    │
+    └─ DNS/SSL/Connection error → increment error counter → mark as "UNREACHABLE" → notify immediately
+```
+
+**Failure state machine per URL:**
+
+| State | Condition | Action |
+|-------|-----------|--------|
+| `ACTIVE` | Last check succeeded (HTTP 200) | Normal operation |
+| `ERRORING` | 2 consecutive failures | Flag in UI, do NOT notify yet (give transient errors time to resolve) |
+| `DOWN` | 3+ consecutive failures | Notify user, mark URL as failed |
+| `DELETED` | First HTTP 404 | Notify user immediately, stop polling |
+| `RECOVERED` | Was DOWN/ERRORING, now HTTP 200 | Notify user of recovery, return to ACTIVE |
+
+**UI status indicators (rendered per URL in the monitoring dashboard):**
+
+| Status | Badge Color | Icon | Tooltip |
+|--------|-------------|------|---------|
+| ACTIVE | Green | ● | Last checked: 2 min ago |
+| ERRORING | Yellow | ● | 2 consecutive failures — monitoring |
+| DOWN | Red | ● | 3+ failures — URL may be down |
+| DELETED | Orange | ● | HTTP 404 — page removed |
+| UNREACHABLE | Magenta | ● | DNS/SSL/connection error |
+
+**Database schema addition:**
+
+```python
+class UrlCheckResult(Base):
+    __tablename__ = "url_check_results"
+    
+    id = Column(UUID, primary_key=True, default=uuid.uuid4)
+    url_id = Column(UUID, ForeignKey("urls.id"), nullable=False)
+    status_code = Column(Integer, nullable=True)  # HTTP status code
+    content_hash = Column(String, nullable=True)
+    content = Column(Text, nullable=True)
+    structured_data = Column(JSON, nullable=True)
+    judgment = Column(JSON, nullable=True)
+    error_message = Column(Text, nullable=True)  # "HTTP 404", "Timeout after 30s", "DNS resolution failed"
+    check_duration_ms = Column(Integer, nullable=True)
+    is_failure = Column(Boolean, default=False)  # True if status_code >= 400 or error occurred
+    failure_consecutive_count = Column(Integer, default=0)  # Rolling count of consecutive failures
+    state = Column(String, default="ACTIVE")  # ACTIVE, ERRORING, DOWN, DELETED, RECOVERED
+    created_at = Column(DateTime, default=utcnow)
+```
+
+**UI implementation — URL status card in the monitoring dashboard:**
+
+```typescript
+// components/UrlStatusCard.tsx
+interface UrlStatusCardProps {
+  url: Url;
+  lastCheck: UrlCheckResult | null;
+}
+
+export function UrlStatusCard({ url, lastCheck }: UrlStatusCardProps) {
+  const status = lastCheck?.state ?? 'ACTIVE';
+  
+  const statusConfig = {
+    ACTIVE:    { color: 'bg-emerald-500', icon: '●', label: 'Active' },
+    ERRORING:  { color: 'bg-amber-500',   icon: '●', label: 'Erroring' },
+    DOWN:      { color: 'bg-red-500',     icon: '●', label: 'Down' },
+    DELETED:   { color: 'bg-orange-500',  icon: '●', label: 'Deleted' },
+    UNREACHABLE: { color: 'bg-fuchsia-500', icon: '●', label: 'Unreachable' },
+  };
+  
+  const config = statusConfig[status];
+  
+  return (
+    <div className="flex items-center gap-3 p-3 border rounded-lg">
+      <span className={`w-3 h-3 rounded-full ${config.color}`} />
+      <div className="flex-1">
+        <div className="font-medium truncate">{url.name || url.url}</div>
+        <div className="text-xs text-gray-500">
+          {config.label}
+          {lastCheck?.error_message && ` — ${lastCheck.error_message}`}
+        </div>
+      </div>
+      {status === 'DELETED' && (
+        <Button variant="ghost" size="sm" onClick={() => handleDeleteUrl(url.id)}>
+          Remove
+        </Button>
+      )}
+      {status === 'DOWN' && (
+        <Button variant="ghost" size="sm" onClick={() => handleRetry(url.id)}>
+          Retry
+        </Button>
+      )}
+    </div>
+  );
+}
+```
+
+**Backend failure detection logic:**
+
+```python
+# app/services/check_service.py
+from enum import Enum
+
+class UrlState(Enum):
+    ACTIVE = "ACTIVE"
+    ERRORING = "ERRORING"
+    DOWN = "DOWN"
+    DELETED = "DELETED"
+    UNREACHABLE = "UNREACHABLE"
+    RECOVERED = "RECOVERED"
+
+class CheckService:
+    def __init__(self, backend: ExtractionBackend):
+        self.backend = backend
+        self.ERROR_THRESHOLD = 2  # consecutive failures to enter ERRORING
+        self.DOWN_THRESHOLD = 3   # consecutive failures to enter DOWN
+    
+    async def check_url(self, url_id: UUID) -> UrlCheckResult:
+        url = await self.get_url(url_id)
+        
+        try:
+            result = await self.backend.extract(url.url)
+            
+            # Success — reset failure counter
+            if result.status == "success":
+                await self._record_success(url_id, result)
+                return result
+            
+            # HTTP error from backend
+            if result.error_message:
+                await self._handle_http_error(url_id, result)
+                return result
+                
+        except TimeoutError:
+            await self._handle_timeout(url_id)
+        except Exception as e:
+            await self._handle_generic_error(url_id, str(e))
+        
+        return result
+    
+    async def _handle_http_error(self, url_id: UUID, result: ExtractionResult):
+        """Handle HTTP errors (4xx, 5xx) with state machine logic."""
+        status_code = result.metadata.get("status_code")
+        
+        if status_code == 404:
+            # Page deleted — stop polling
+            await self._transition_state(url_id, UrlState.DELETED)
+            await self._notify(url_id, "Page deleted (HTTP 404)")
+        else:
+            # Other errors — count consecutive failures
+            await self._count_failure(url_id, result)
+    
+    async def _handle_timeout(self, url_id: UUID):
+        """Handle timeout — increment consecutive failure count."""
+        await self._count_failure(url_id, "Timeout after 30s")
+    
+    async def _handle_generic_error(self, url_id: UUID, error: str):
+        """Handle DNS/SSL/connection errors."""
+        await self._count_failure(url_id, error)
+    
+    async def _count_failure(self, url_id: UUID, error_msg: str):
+        """Increment consecutive failure counter and update state."""
+        url = await self.get_url(url_id)
+        new_count = (url.failure_consecutive_count or 0) + 1
+        
+        if new_count == 1:
+            new_state = UrlState.ERRORING
+        elif new_count >= self.DOWN_THRESHOLD:
+            new_state = UrlState.DOWN
+            await self._notify(url_id, f"URL down after {new_count} consecutive failures: {error_msg}")
+        else:
+            new_state = UrlState.ERRORING
+        
+        await self._update_url_state(url_id, new_state, error_msg, new_count)
+    
+    async def _record_success(self, url_id: UUID, result: ExtractionResult):
+        """Record successful check, reset failure counter."""
+        url = await self.get_url(url_id)
+        
+        # Check if we recovered from a failure state
+        if url.state in (UrlState.ERRORING.value, UrlState.DOWN.value, UrlState.UNREACHABLE.value):
+            await self._notify(url_id, f"URL recovered! ({url.state} → ACTIVE)")
+            await self._update_url_state(url_id, UrlState.RECOVERED, None, 0)
+        
+        # Reset consecutive failure counter
+        await self._update_url_state(url_id, UrlState.ACTIVE, None, 0)
+        
+        # Store the result
+        await self._store_check_result(url_id, result)
+    
+    async def _transition_state(self, url_id: UUID, new_state: UrlState):
+        """Transition URL to a new state."""
+        url = await self.get_url(url_id)
+        url.state = new_state.value
+        url.failure_consecutive_count = 0 if new_state == UrlState.DELETED else url.failure_consecutive_count
+        await self.db.commit()
+```
+
+**Dashboard overview panel — failure summary:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  MONITORING DASHBOARD                                       │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  SUMMARY:                                                   │
+│  ● 5 Active    ● 1 Erroring  ● 2 Down  ● 0 Deleted         │
+│                                                             │
+│  URL STATUS LIST:                                           │
+│                                                             │
+│  ● ChatGPT Terms of Use          2m ago  ACTIVE            │
+│  ● ChatGPT Privacy Policy        2m ago  ACTIVE            │
+│  ● Claude Consumer Terms         2m ago  ERRORING  [2]     │
+│  ● Claude Privacy Policy         2m ago  DOWN      [5]     │
+│  ● Claude Commercial Terms       2m ago  ACTIVE            │
+│  ● Gemini API Terms              2m ago  ACTIVE            │
+│  ● Google Terms of Service       2m ago  ACTIVE            │
+│  ● Google Privacy Policy         2m ago  DELETED           │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key design decisions:**
+
+1. **Erroring state is silent** — we don't spam users with notifications for transient errors (network blips, temporary 503s). We wait for the second consecutive failure before flagging in the UI.
+2. **404 is immediate** — a deleted page is a meaningful event. We notify immediately and stop polling.
+3. **Recovery notification** — when a DOWN/ERRORING URL recovers, we notify the user so they know the issue resolved itself.
+4. **Failure count visible in UI** — the bracketed number `[2]` shows consecutive failure count, giving users context.
+5. **Retry button** — users can manually retry a DOWN URL to force a fresh check.
+6. **Delete button** — for DELETED URLs, users can remove them from monitoring.
 
 ---
 
