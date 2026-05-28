@@ -41,14 +41,15 @@ This document presents the architecture for **Emily Web Delta** — a web-based 
 
 Firecrawl's monitoring service handles the heavy lifting — scheduled scraping, content extraction, AI-powered change judging, structured field extraction, and unified diffs. Our product focuses on what Firecrawl doesn't do: multi-tenant team collaboration, custom web UI, advanced analytics, notification routing, and plugin extensibility.
 
-**The self-hosted fallback** (custom polling, readability-lxml extraction, difflib-based diffing) is a secondary path for users who cannot or will not use Firecrawl. It is fully functional but not the primary development focus.
+**The self-hosted fallback** (custom polling, CloakBrowser stealth rendering, readability-lxml extraction, difflib-based diffing) is a secondary path for users who cannot or will not use Firecrawl. It is fully functional but not the primary development focus.
 
 **Recommended stack:**
 - **Backend:** Python 3.12+ with FastAPI (async), SQLAlchemy (ORM)
 - **Frontend:** React 18+ with TypeScript, Vite, TailwindCSS, diff2html
 - **Database:** PostgreSQL 16+ (primary), Redis (cache + rate limiting)
 - **Primary Extraction:** Firecrawl Monitoring API (scraping + AI diffing + structured extraction)
-- **Fallback Extraction:** Self-hosted polling with Playwright, readability-lxml, difflib
+- **Fallback Extraction:** Self-hosted polling with CloakBrowser (stealth Chromium), readability-lxml, difflib
+- **Extraction Abstraction:** Common Python ABC (`ExtractionBackend`) so the rest of the codebase never knows which backend is in use
 - **Deployment:** Docker Compose (dev), Docker/Kubernetes (prod)
 
 ---
@@ -314,11 +315,11 @@ This is what we planned to build with semantic diffing, but Firecrawl has it pro
 |  |  - Crawl monitors                                            ||
 |  |  - Webhook delivery                                          ||
 |  +---------------------------------------------------------------+|
-|  |  Fallback: Self-Hosted Polling Engine                        ||
-|  |  - Celery workers for polling                                ||
-|  |  - Playwright for JS rendering                               ||
-|  |  - readability-lxml + trafilatura for extraction             ||
-|  |  - difflib + custom semantic for diffing                     ||
+|  Fallback: Self-Hosted Polling Engine                        |
+|  - Celery workers for polling                                |
+|  - CloakBrowser for stealth JS rendering (anti-bot bypass)   |
+|  - readability-lxml + trafilatura for extraction             |
+|  - difflib + custom semantic for diffing                     |
 |  +---------------------------------------------------------------+|
 |                           |                                        |
 +---------------------------+----------------------------------------+
@@ -583,7 +584,7 @@ The self-hosted fallback is for:
    +----------+  +----------+  +----------+
 
 Each worker:
-  1. Fetch URL (Playwright for JS, httpx for static)
+  1. Fetch URL (CloakBrowser for stealth JS rendering, httpx for static)
   2. Extract content (readability-lxml, trafilatura)
   3. Compute hash (SHA-256 of normalized text)
   4. Compare with last_hash
@@ -602,7 +603,7 @@ async def poll_url(url_id: UUID):
     
     # Step 1: Fetch
     if url.js_required:
-        content = await fetch_with_playwright(url.url, url.headers)
+        content = await fetch_with_cloakbrowser(url.url, url.headers)
     else:
         content = await fetch_with_httpx(url.url, url.headers)
     
@@ -1077,9 +1078,368 @@ Pruning Strategy:
 
 ---
 
-## 14. EXTENSIBILITY & PLUGIN SYSTEM
+## 14. EXTRACTION ABSTRACTION LAYER
 
-### 14.1 Plugin Architecture
+### 14.1 The Problem
+
+The rest of the codebase (URL CRUD, check results, notifications, analytics, UI) should never know whether content came from Firecrawl or self-hosted polling. Without an abstraction, every service layer would have `if backend == "firecrawl": ... else: ...` scattered everywhere.
+
+### 14.2 The Interface: `ExtractionBackend` ABC
+
+```python
+# app/core/extraction_backend.py
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Optional
+
+class ExtractionMode(Enum):
+    """What kind of content to extract."""
+    MARKDOWN = "markdown"           # Full page text (default)
+    JSON_SCHEMA = "json_schema"     # Structured extraction via schema
+    MIXED = "mixed"                 # Both markdown + structured
+    RAW_HTML = "raw_html"           # Raw HTML for custom parsing
+
+@dataclass
+class ExtractionResult:
+    """Standardized result from ANY backend. Every backend returns this."""
+    url: str
+    status: str                     # "same", "changed", "new", "removed", "error"
+    content: str                    # Extracted text/markdown
+    content_hash: str               # SHA-256 of normalized content
+    structured_data: Optional[dict] # JSON-mode extraction
+    diff_text: Optional[str]        # Unified diff (if changed)
+    diff_json: Optional[dict]       # JSON-mode diff (if changed)
+    judgment: Optional[dict]        # AI judgment: {meaningful, confidence, reason}
+    metadata: dict = field(default_factory=dict)  # {title, status_code, load_time, ...}
+    error: Optional[str] = None     # Error message if status == "error"
+
+class ExtractionBackend(ABC):
+    """Common interface for all extraction backends.
+    
+    The rest of the codebase calls this interface and never knows
+    whether the actual implementation is Firecrawl or self-hosted.
+    """
+    
+    @abstractmethod
+    async def extract(
+        self,
+        url: str,
+        mode: ExtractionMode = ExtractionMode.MARKDOWN,
+        schema: Optional[dict] = None,
+        goal: Optional[str] = None,
+        headers: Optional[dict] = None,
+        cookies: Optional[dict] = None,
+    ) -> ExtractionResult:
+        """Extract content from a URL and return standardized result."""
+        ...
+    
+    @abstractmethod
+    async def crawl(
+        self,
+        start_url: str,
+        limit: int = 100,
+        max_depth: int = 3,
+        include_paths: Optional[list[str]] = None,
+    ) -> list[ExtractionResult]:
+        """Crawl a site and return results for all discovered pages."""
+        ...
+    
+    @abstractmethod
+    async def supports_structured_extraction(self) -> bool:
+        """Whether this backend supports JSON-mode structured extraction."""
+        ...
+    
+    @abstractmethod
+    async def supports_ai_judging(self) -> bool:
+        """Whether this backend supports AI-powered change judging."""
+        ...
+```
+
+### 14.3 Firecrawl Backend Implementation
+
+```python
+# app/core/backends/firecrawl_backend.py
+from app.core.extraction_backend import ExtractionBackend, ExtractionResult, ExtractionMode
+
+class FirecrawlBackend(ExtractionBackend):
+    """Primary backend: uses Firecrawl Monitoring API."""
+    
+    def __init__(self, api_key: str, base_url: str = "https://api.firecrawl.dev"):
+        self.api_key = api_key
+        self.base_url = base_url
+    
+    async def extract(
+        self,
+        url: str,
+        mode: ExtractionMode = ExtractionMode.MARKDOWN,
+        schema: Optional[dict] = None,
+        goal: Optional[str] = None,
+        headers: Optional[dict] = None,
+        cookies: Optional[dict] = None,
+    ) -> ExtractionResult:
+        """
+        Firecrawl doesn't have a single-page-on-demand API.
+        Strategy: use Firecrawl's scrape API for on-demand checks.
+        
+        For scheduled monitoring, we use Firecrawl's monitor API + webhooks,
+        and the webhook handler stores results directly.
+        """
+        import httpx
+        
+        # Build scrape payload based on mode
+        formats = ["markdown"]
+        if mode == ExtractionMode.JSON_SCHEMA and schema:
+            formats = [{
+                "type": "changeTracking",
+                "modes": ["json"],
+                "schema": schema,
+            }]
+        elif mode == ExtractionMode.MIXED:
+            formats = [{
+                "type": "changeTracking",
+                "modes": ["json", "git-diff"],
+                "schema": schema,
+            }]
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.base_url}/v2/scrape",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "url": url,
+                    "formats": formats,
+                    "mobile": True,
+                },
+            )
+            data = response.json()
+        
+        # Map Firecrawl response to ExtractionResult
+        return ExtractionResult(
+            url=url,
+            status="changed" if data.get("success") else "error",
+            content=data.get("data", {}).get("markdown", ""),
+            content_hash=hashlib.sha256(
+                data.get("data", {}).get("markdown", "").encode()
+            ).hexdigest(),
+            structured_data=data.get("data", {}).get("json"),
+            judgment=None,  # AI judging is done by monitor API, not scrape API
+            metadata={
+                "title": data.get("data", {}).get("metadata", {}).get("title"),
+                "status_code": response.status_code,
+            },
+        )
+    
+    async def crawl(self, start_url, limit=100, max_depth=3, include_paths=None):
+        """Create a crawl monitor via Firecrawl API.
+        
+        Note: Firecrawl's crawl is monitor-based (scheduled via webhooks).
+        For on-demand crawl, we return a monitor config that the webhook handler
+        will process.
+        """
+        ...
+    
+    async def supports_structured_extraction(self) -> bool:
+        return True  # JSON-mode with Pydantic/zod schemas
+    
+    async def supports_ai_judging(self) -> bool:
+        return True  # goal field + LLM judging via monitor API
+```
+
+### 14.4 Self-Hosted Backend Implementation (with CloakBrowser)
+
+```python
+# app/core/backends/selfhosted_backend.py
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+import hashlib
+import difflib
+import importlib
+
+from app.core.extraction_backend import ExtractionBackend, ExtractionResult, ExtractionMode
+
+class SelfHostedBackend(ExtractionBackend):
+    """Fallback backend: self-hosted polling with CloakBrowser stealth rendering.
+    
+    CloakBrowser is a drop-in Playwright replacement with 58 C++ fingerprint patches.
+    It passes Cloudflare Turnstile, reCAPTCHA v3, FingerprintJS — sites that block
+    regular Playwright immediately.
+    
+    Key difference from Playwright:
+    - Playwright: navigator.webdriver=true, no chrome object, TLS mismatch -> BLOCKED
+    - CloakBrowser: navigator.webdriver=false, chrome object present, TLS match -> PASS
+    """
+    
+    def __init__(self, use_cloakbrowser: bool = True):
+        self.use_cloakbrowser = use_cloakbrowser
+        
+        # CloakBrowser is the key addition — replaces Playwright for stealth
+        if use_cloakbrowser:
+            from cloakbrowser import launch_async
+            self.launch = launch_async
+        else:
+            from playwright.async_api import async_playwright
+            self._playwright = async_playwright
+    
+    async def extract(
+        self,
+        url: str,
+        mode: ExtractionMode = ExtractionMode.MARKDOWN,
+        schema: Optional[dict] = None,
+        goal: Optional[str] = None,
+        headers: Optional[dict] = None,
+        cookies: Optional[dict] = None,
+    ) -> ExtractionResult:
+        """
+        1. Fetch with CloakBrowser (stealth Chromium) or Playwright
+        2. Extract content with readability-lxml / trafilatura
+        3. Compute hash and diff against last snapshot
+        4. Return standardized ExtractionResult
+        """
+        import httpx
+        from readability import readability
+        import trafilatura
+        
+        start_time = __import__('time').time()
+        
+        # Step 1: Fetch — CloakBrowser for stealth
+        if self.use_cloakbrowser:
+            browser = await self.launch(humanize=True)
+        else:
+            pw = await self._playwright()
+            browser = await pw.chromium.launch()
+        
+        try:
+            page = await browser.new_page()
+            
+            # Apply custom headers/cookies if provided
+            if headers:
+                await page.set_extra_http_headers(headers)
+            if cookies:
+                for cookie in cookies:
+                    await page.context.add_cookie(cookie)
+            
+            await page.goto(url, wait_until="networkidle", timeout=30000)
+            content = await page.content()
+            title = await page.title()
+        finally:
+            await browser.close()
+        
+        load_time = (time.time() - start_time) * 1000
+        
+        # Step 2: Extract content
+        if mode == ExtractionMode.RAW_HTML:
+            extracted = content
+        elif mode == ExtractionMode.JSON_SCHEMA and schema:
+            # Custom JSON extraction from HTML
+            extracted = await self._extract_json(content, schema)
+        else:
+            # Default: readability-lxml for article extraction
+            extracted = trafilatura.extract(content) or content
+        
+        # Step 3: Hash
+        content_hash = hashlib.sha256(extracted.encode()).hexdigest()
+        
+        # Step 4: Compare with last snapshot (DB lookup)
+        # This is handled by the service layer, not the backend
+        # The backend returns the result; the service decides "same" vs "changed"
+        
+        return ExtractionResult(
+            url=url,
+            status="changed",  # Service layer determines actual status
+            content=extracted,
+            content_hash=content_hash,
+            structured_data=None,  # Populated if mode == JSON_SCHEMA
+            metadata={
+                "title": title,
+                "load_time_ms": round(load_time, 2),
+                "content_length": len(extracted),
+            },
+        )
+    
+    async def crawl(self, start_url, limit=100, max_depth=3, include_paths=None):
+        """Self-hosted crawl using CloakBrowser for JS rendering."""
+        ...
+    
+    async def supports_structured_extraction(self) -> bool:
+        return True  # Custom JSON schema extraction
+    
+    async def supports_ai_judging(self) -> bool:
+        return False  # We'd need to add LLM judging ourselves
+    
+    async def _extract_json(self, html: str, schema: dict) -> dict:
+        """Extract structured data from HTML using custom rules."""
+        # Implementation: XPath/CSS selectors + regex + LLM extraction
+        ...
+```
+
+### 14.5 Service Layer Usage (Backend-Agnostic)
+
+```python
+# app/services/url_service.py
+from app.core.extraction_backend import ExtractionBackend, ExtractionResult
+
+class UrlService:
+    """Service layer NEVER knows which backend is in use."""
+    
+    def __init__(self, extraction_backend: ExtractionBackend):
+        self.backend = extraction_backend
+    
+    async def check_url(self, url_id: UUID) -> ExtractionResult:
+        """Check a URL — backend is transparent."""
+        url = await self.get_url(url_id)
+        
+        # Dispatch to the correct backend via the interface
+        result = await self.backend.extract(
+            url=url.url,
+            mode=ExtractionMode.MARKDOWN,  # or JSON_SCHEMA, MIXED, etc.
+            schema=url.schema,              # if configured
+            goal=url.goal,                  # if configured (Firecrawl AI judging)
+            headers=url.headers,
+            cookies=url.cookies,
+        )
+        
+        # The rest of the logic is the same regardless of backend
+        await self._store_result(url_id, result)
+        await self._check_for_changes(result)
+        return result
+    
+    async def check_url_firecrawl(self, url_id: UUID):
+        """DEPRECATED — use check_url() instead. The backend is chosen at init time."""
+        ...
+```
+
+### 14.6 Backend Selection at Startup
+
+```python
+# app/main.py
+from app.core.backends.firecrawl_backend import FirecrawlBackend
+from app.core.backends.selfhosted_backend import SelfHostedBackend
+
+def create_backend(backend_type: str = "firecrawl") -> ExtractionBackend:
+    """Factory function — returns the correct backend implementation."""
+    if backend_type == "firecrawl":
+        return FirecrawlBackend(api_key=settings.firecrawl_api_key)
+    elif backend_type == "selfhosted":
+        return SelfHostedBackend(use_cloakbrowser=True)
+    else:
+        raise ValueError(f"Unknown backend: {backend_type}")
+
+# In the FastAPI dependency:
+@asynccontextmanager
+async def get_backend() -> ExtractionBackend:
+    backend = create_backend("firecrawl")  # or "selfhosted" from settings
+    yield backend
+```
+
+---
+
+## 15. EXTENSIBILITY & PLUGIN SYSTEM
+
+### 15.1 Plugin Architecture
 
 ```
 +----------------------------------------------------------+
@@ -1258,7 +1618,7 @@ Week 2: Firecrawl Webhooks
 
 Week 3: Self-Hosted Fallback
   - Celery workers for polling
-  - Playwright/httpx fetching
+  - CloakBrowser for stealth JS rendering (anti-bot bypass)
   - readability-lxml extraction
   - difflib-based diffing
   - Switch between Firecrawl and self-hosted per URL
@@ -1360,7 +1720,7 @@ Deliverable: Full SaaS platform ready for launch
 | **Diff Viewer** | diff2html | Best balance of features and simplicity |
 | **Code Diff** | monaco-editor | VS Code quality, optional for code-heavy pages |
 | **HTTP Client** | httpx (async) | Async, supports cookies, headers, sessions |
-| **Browser Automation** | Playwright | JS rendering for self-hosted fallback |
+| **Browser Automation** | CloakBrowser | Stealth Chromium — replaces Playwright for self-hosted fallback. 58 C++ fingerprint patches, passes Cloudflare Turnstile/reCAPTCHA v3/FingerprintJS |
 | **Content Extraction** | readability-lxml + trafilatura | Article extraction, text cleaning |
 | **Diff Engine** | difflib (std) + custom semantic | Line-level + paragraph-level diffs (self-hosted) |
 | **Task Queue** | Celery + Redis | Self-hosted polling (fallback only) |
@@ -1373,7 +1733,8 @@ Deliverable: Full SaaS platform ready for launch
 | **Container** | Docker + Docker Compose | Dev and prod consistency |
 | **CI/CD** | GitHub Actions | Automated testing, building, deployment |
 | **Primary Backend** | Firecrawl Monitoring API | Scraping + AI diffing + structured extraction |
-| **Fallback Backend** | Self-hosted polling | Celery + Playwright + readability-lxml + difflib |
+| **Fallback Backend** | Self-hosted polling | Celery + CloakBrowser (stealth Chromium) + readability-lxml + difflib |
+| **Extraction Abstraction** | `ExtractionBackend` ABC | Common Python interface — `FirecrawlBackend` and `SelfHostedBackend` implement it. The rest of the codebase is backend-agnostic. |
 
 ---
 
