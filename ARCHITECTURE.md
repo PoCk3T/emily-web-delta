@@ -2,7 +2,7 @@
 
 > **Author:** Lucas Fontaine (CTO/Co-Founder) via Hermes Agent
 > **Date:** 2026-05-28
-> **Status:** Initial Architecture Research & Planning Document
+> **Status:** Architecture Document — Firecrawl-Primary
 > **Project Name:** emily-web-delta
 
 ---
@@ -12,43 +12,43 @@
 1. Executive Summary
 2. Problem Statement & Use Cases
 3. Competitive Landscape Analysis
-4. System Architecture Overview
-5. Change Detection Strategies
-6. Content Extraction & Normalization
-7. Diff Algorithms & Delta Computation
-8. Backend Tech Stack Evaluation
-9. Frontend Tech Stack Evaluation
-10. Database Schema Design
-11. API Design
-12. Security Architecture
-13. Monitoring, Alerting & Notifications
-14. Performance & Scalability
-15. Extensibility & Plugin System
-16. Deployment & DevOps
-17. Implementation Roadmap
-18. Technology Recommendations Summary
-19. Project Structure
-20. Key Design Decisions & Rationale
-21. Risks & Mitigations
-22. Cost Estimates
+4. Why Firecrawl First
+5. System Architecture Overview
+6. Firecrawl Integration Design
+7. Self-Hosted Fallback Design
+8. Database Schema Design
+9. API Design
+10. Frontend Tech Stack
+11. Security Architecture
+12. Monitoring, Alerting & Notifications
+13. Performance & Scalability
+14. Extensibility & Plugin System
+15. Deployment & DevOps
+16. Implementation Roadmap
+17. Technology Recommendations Summary
+18. Project Structure
+19. Key Design Decisions & Rationale
+20. Risks & Mitigations
+21. Cost Estimates
 
 ---
 
 ## 1. EXECUTIVE SUMMARY
 
-This document presents a comprehensive architecture for **Emily Web Delta** — a self-hosted, web-based platform for monitoring configurable URLs, detecting content changes, computing meaningful deltas, and providing a rich web UI for browsing diffs and receiving alerts.
+This document presents the architecture for **Emily Web Delta** — a web-based platform for monitoring configurable URLs, detecting content changes, computing meaningful deltas, and providing a rich UI for browsing diffs and receiving alerts.
 
-**Key architectural decision: Modular monolith with clear boundaries.**
+**Core architectural decision: Firecrawl Monitoring API as the primary backend.**
 
-For early-stage development, a well-structured monolith is optimal. Module boundaries are clearly defined so that the polling engine, diff engine, API server, and web UI can be extracted independently if scale demands it.
+Firecrawl's monitoring service handles the heavy lifting — scheduled scraping, content extraction, AI-powered change judging, structured field extraction, and unified diffs. Our product focuses on what Firecrawl doesn't do: multi-tenant team collaboration, custom web UI, advanced analytics, notification routing, and plugin extensibility.
+
+**The self-hosted fallback** (custom polling, readability-lxml extraction, difflib-based diffing) is a secondary path for users who cannot or will not use Firecrawl. It is fully functional but not the primary development focus.
 
 **Recommended stack:**
-- **Backend:** Python 3.12+ with FastAPI (async), SQLAlchemy (ORM), Celery (task queue)
+- **Backend:** Python 3.12+ with FastAPI (async), SQLAlchemy (ORM)
 - **Frontend:** React 18+ with TypeScript, Vite, TailwindCSS, diff2html
-- **Database:** PostgreSQL 16+ (primary), Redis (cache + broker)
-- **Task Queue:** Celery + Redis
-- **Content Extraction:** readability-lxml + trafilatura
-- **JS Rendering:** Playwright (optional, per-URL)
+- **Database:** PostgreSQL 16+ (primary), Redis (cache + rate limiting)
+- **Primary Extraction:** Firecrawl Monitoring API (scraping + AI diffing + structured extraction)
+- **Fallback Extraction:** Self-hosted polling with Playwright, readability-lxml, difflib
 - **Deployment:** Docker Compose (dev), Docker/Kubernetes (prod)
 
 ---
@@ -73,11 +73,13 @@ Web pages change constantly — prices, stock status, content, layout, terms of 
 
 - Configurable URL list (add/remove/enable/disable without code changes)
 - Configurable polling intervals per URL
-- Meaningful diff computation (not just raw HTML comparison)
+- Meaningful diff computation (AI-powered, not just raw HTML comparison)
 - Web-based UI for full interaction
 - Notification system (email, webhook, Slack, etc.)
 - Snapshot history with timeline view
-- Delta visualization (side-by-side, unified, semantic)
+- Delta visualization (side-by-side, unified, semantic, structured)
+- Multi-tenant team collaboration
+- Change analytics (frequency, trends, anomaly detection)
 
 ---
 
@@ -85,7 +87,7 @@ Web pages change constantly — prices, stock status, content, layout, terms of 
 
 ### 3.1 changedetection.io (31,752 stars, Python, Apache-2.0)
 
-The dominant open-source player. Self-hosted, Docker-based, with browser-based UI.
+The dominant open-source player. Self-hosted, Docker-based, browser-based UI.
 
 **Strengths:**
 - Massive community (31K+ stars, 1800+ forks)
@@ -98,19 +100,43 @@ The dominant open-source player. Self-hosted, Docker-based, with browser-based U
 - RSS feed generation
 - Active development (updated daily)
 
-**Gaps / Opportunities:**
+**Gaps:**
 - Diff quality is limited — primarily text-based line diffing
 - No semantic/paragraph-level diffing
 - No structured field extraction (price, stock, etc.)
+- No AI-powered change judging
 - No multi-tenancy or team collaboration
 - No API-first design (primarily a single-user tool)
 - No pricing tiers or SaaS features
 - No advanced analytics (change frequency, uptime, trend analysis)
-- Single-tenant by design — no user accounts, no organizations
 
-### 3.2 ArchiveBox (27,562 stars, Python, MIT)
+### 3.2 Firecrawl Monitoring (Commercial SaaS)
 
-Web archiving tool — saves complete page snapshots (HTML, JS, PDF, media, screenshots).
+The new entrant with AI-powered monitoring.
+
+**Strengths:**
+- AI-powered meaningful change judging (LLM evaluates if change matters)
+- JSON-mode structured extraction with per-field diffs
+- Mixed mode (JSON + git-diff)
+- Crawl monitors (auto-discover and diff all pages)
+- Natural language scheduling ("every 30 minutes")
+- Webhook-first notifications
+- Clean API with Python/JS SDKs
+- Credit-based pricing (pay per scrape + per judged change)
+
+**Gaps:**
+- No web UI (API-only)
+- No multi-tenancy
+- No team collaboration
+- No self-hosting option
+- Vendor lock-in (credit costs, data on their servers)
+- No change analytics (frequency, trends, anomaly detection)
+- No browser extension
+- No plugin system for custom integrations
+
+### 3.3 ArchiveBox (27,562 stars, Python, MIT)
+
+Web archiving tool — saves complete page snapshots.
 
 **Strengths:**
 - Comprehensive archiving (HTML, PDF, screenshots, media)
@@ -118,14 +144,14 @@ Web archiving tool — saves complete page snapshots (HTML, JS, PDF, media, scre
 - Docker-based, self-hosted
 - Rich export options (WARC, singlefile)
 
-**Gaps / Opportunities:**
-- Not designed for change detection — it's an archiving tool
+**Gaps:**
+- Not designed for change detection
 - No diff computation between snapshots
 - No alerting/notification system
 - No structured change tracking
-- Overkill for monitoring use case (stores everything)
+- Overkill for monitoring use case
 
-### 3.3 Visualping (Commercial SaaS)
+### 3.4 Visualping (Commercial SaaS)
 
 The leading commercial web monitoring service.
 
@@ -136,28 +162,13 @@ The leading commercial web monitoring service.
 - API access
 - Trusted brand, enterprise customers
 
-**Gaps / Opportunities:**
+**Gaps:**
 - Paid service (not free/open-source)
 - Limited free tier
 - No self-hosted option
 - Limited customization
 - No semantic diffing or structured data extraction
 - No team collaboration features in lower tiers
-
-### 3.4 Wachete (Commercial SaaS)
-
-Another commercial web monitoring service with similar feature set.
-
-**Strengths:**
-- Good diff quality
-- Multiple notification channels
-- Clean UI
-- API access
-
-**Gaps / Opportunities:**
-- Paid service
-- Limited open-source alternatives
-- No self-hosted option
 
 ### 3.5 Distill.io (Commercial SaaS)
 
@@ -169,41 +180,98 @@ Enterprise-focused web monitoring with advanced features.
 - API access
 - Team collaboration
 
-**Gaps / Opportunities:**
+**Gaps:**
 - Expensive (enterprise pricing)
 - No self-hosted option
 - Complex setup
 
 ### 3.6 Market Gap Analysis
 
-| Feature | changedetection.io | Visualping | Distill | Emily Web Delta |
-|---------|-------------------|------------|---------|-----------------|
-| Self-hosted | Yes | No | No | Yes |
-| Open-source | Yes | No | No | Yes |
-| Free tier | Yes (full) | Limited | No | Yes |
-| Semantic diff | No | Partial | Partial | Yes |
-| Structured extraction | No | No | No | Yes |
-| Multi-tenancy | No | Yes | Yes | Yes |
-| Team collaboration | No | Yes | Yes | Yes |
-| API-first | Partial | Yes | Yes | Yes |
-| Plugin system | No | No | No | Yes |
-| Change analytics | No | No | Limited | Yes |
-| Browser extension | No | Yes | No | Future |
-| Mobile app | No | No | No | Future |
+| Feature | changedetection.io | Firecrawl | Visualping | Distill | Emily Web Delta |
+|---------|-------------------|-----------|------------|---------|-----------------|
+| Self-hosted | Yes | No | No | No | Yes |
+| Open-source | Yes | No | No | No | Yes |
+| Free tier | Yes (full) | Credit-based | Limited | No | Yes |
+| AI judging | No | Yes | Partial | Partial | Yes (via Firecrawl) |
+| Structured extraction | No | Yes | No | No | Yes |
+| Multi-tenancy | No | No | Yes | Yes | Yes |
+| Team collaboration | No | No | Yes | Yes | Yes |
+| Web UI | Yes | No | Yes | Yes | Yes |
+| API-first | Partial | Yes | Yes | Yes | Yes |
+| Plugin system | No | No | No | No | Yes |
+| Change analytics | No | No | No | Limited | Yes |
+| Browser extension | No | No | Yes | No | Future |
+| Mobile app | No | No | No | No | Future |
 
 **Key Differentiators for Emily Web Delta:**
-1. **Semantic diffing** — paragraph-level, field-level, not just line-level
-2. **Structured data extraction** — recognize prices, dates, stock levels, etc.
-3. **Multi-tenant SaaS** — team collaboration, organizations, plans
-4. **Plugin system** — extensible parsers, diff engines, notification channels
-5. **Change analytics** — frequency analysis, trend detection, anomaly alerts
-6. **API-first design** — full programmatic access from day one
+1. **Web UI + multi-tenant SaaS** — Firecrawl has no UI, no teams, no plans
+2. **Change analytics** — frequency analysis, trend detection, anomaly alerts
+3. **Plugin system** — extensible parsers, diff engines, notification channels
+4. **Self-hosting option** — for air-gapped, on-premise, or cost-sensitive users
+5. **Unified platform** — one place for all monitoring needs, not just API
 
 ---
 
-## 4. SYSTEM ARCHITECTURE OVERVIEW
+## 4. WHY FIRECRAWL FIRST
 
-### 4.1 High-Level Component Diagram
+### 4.1 What Firecrawl Solves
+
+| Problem | Self-Built | Firecrawl |
+|---------|-----------|-----------|
+| Reliable scraping | Months of work, edge cases | Production-ready, handles JS, cookies, headers |
+| Content extraction | readability-lxml + trafilatura + custom rules | AI-powered, handles any page structure |
+| Change judging | Heuristic rules, false positives | LLM judges if change matters, returns confidence + reason |
+| Structured extraction | Custom schema parsing | JSON-mode with Pydantic/zod schemas, per-field diffs |
+| Crawl discovery | Custom crawler | Auto-discovers all pages, diffs each one |
+| Diff quality | Line-level, noisy | Unified text diff + JSON diff + AI summary |
+| Infrastructure | Self-managed, scaling headaches | Managed, scales with usage |
+
+### 4.2 Development Time Savings
+
+| Component | Self-Built | With Firecrawl |
+|-----------|-----------|----------------|
+| Scraping engine | 2-3 weeks | 0 days (API) |
+| Content extraction | 1-2 weeks | 0 days (API) |
+| Diff engine | 1-2 weeks | 0 days (API) |
+| AI change judging | 2-3 weeks | 0 days (API) |
+| Crawl discovery | 1-2 weeks | 0 days (API) |
+| Notification system | 1 week | 1 week (our job) |
+| Web UI | 3-4 weeks | 3-4 weeks (our job) |
+| Multi-tenancy | 2 weeks | 2 weeks (our job) |
+| Change analytics | 2 weeks | 2 weeks (our job) |
+| **Total** | **10-15 weeks** | **8-10 weeks** |
+
+**Net savings: ~40% development time, 4-5 weeks faster to market.**
+
+### 4.3 Quality Advantage
+
+Firecrawl's AI judging is genuinely novel and hard to replicate:
+
+- You pass a plain-language `goal`: "Alert when a new Hacker News story related to AI enters the top 10"
+- The LLM judges each change against that goal
+- Returns `meaningful`, `confidence`, `reason`, `meaningfulChanges`
+- Suppresses noise automatically
+
+This is what we planned to build with semantic diffing, but Firecrawl has it production-ready with an LLM.
+
+### 4.4 Cost Trade-off
+
+| Scenario | Self-Built | Firecrawl |
+|----------|-----------|-----------|
+| 100 URLs, 5 min interval, 30 days | $0 (self-hosted) | ~$14,400 credits (100 x 2880 checks) |
+| 100 URLs, 30 min interval, 30 days | $0 (self-hosted) | ~$2,880 credits |
+| 100 URLs, hourly, 30 days | $0 (self-hosted) | ~$21,600 credits |
+| 10 URLs, daily, 30 days | $0 (self-hosted) | ~$288 credits |
+
+**Key insight:** Firecrawl costs scale with frequency. For high-frequency monitoring (5 min intervals), costs can be significant. For daily/low-frequency monitoring, costs are negligible.
+
+**Mitigation:** Self-hosted fallback for high-frequency monitoring where cost is a concern. Users can mix: Firecrawl for daily/low-frequency, self-hosted for high-frequency.
+
+---
+
+## 5. SYSTEM ARCHITECTURE OVERVIEW
+
+### 5.1 High-Level Component Diagram
 
 ```
 +------------------------------------------------------------------+
@@ -237,22 +305,28 @@ Enterprise-focused web monitoring with advanced features.
 |  +---------------------------------------------------------------+|
 |                           |                                        |
 +---------------------------+----------------------------------------+
-|                           |         WORKER LAYER                   |
+|                           |         BACKEND LAYER                  |
 |  +------------------------+----------------------------------------+|
-|  |     Celery Workers                                      |        ||
-|  |  +------------------+ +-------------------------------+  |  ||
-|  |  |  Polling Worker  | |  Diff/Processing Worker       |  |  ||
-|  |  |  (fetch + hash)  | |  (content extraction + diff)  |  |  ||
-|  |  +------------------+ +-------------------------------+  |  ||
-|  +-----------------------------------------------------------+||
+|  |  Primary: Firecrawl Monitoring API                             ||
+|  |  - Scheduled scraping                                        ||
+|  |  - AI-powered change judging                                 ||
+|  |  - JSON-mode structured extraction                           ||
+|  |  - Crawl monitors                                            ||
+|  |  - Webhook delivery                                          ||
+|  +---------------------------------------------------------------+|
+|  |  Fallback: Self-Hosted Polling Engine                        ||
+|  |  - Celery workers for polling                                ||
+|  |  - Playwright for JS rendering                               ||
+|  |  - readability-lxml + trafilatura for extraction             ||
+|  |  - difflib + custom semantic for diffing                     ||
+|  +---------------------------------------------------------------+|
 |                           |                                        |
 +---------------------------+----------------------------------------+
 |                           |         DATA LAYER                     |
 |  +------------------------+----------------------------------------+|
 |  |  PostgreSQL  ------  |  ------  Redis                          ||
 |  |  (URLs, Snapshots,  |  (Rate limit counters,                   ||
-|  |   Users, Configs)   |   Celery broker,                         ||
-|  +----------------------+   Cache, Job queue)                    ||
+|  |   Users, Configs)   |   Cache, Session storage)               ||
 |  +------------------------+----------------------------------------+|
 |  |  Object Storage (S3/  |  ------  Log Aggregation               ||
 |  |  MinIO)               |  ------  (Prometheus + Grafana)        ||
@@ -260,410 +334,340 @@ Enterprise-focused web monitoring with advanced features.
 +------------------------------------------------------------------+
 ```
 
-### 4.2 Data Flow
+### 5.2 Data Flow
 
 ```
-1. POLLING CYCLE:
-   Scheduler (Celery Beat)
+1. PRIMARY PATH (Firecrawl):
+   User creates monitor via Web UI
         |
         v
-   [Check intervals] -> Identify URLs due for polling
+   FastAPI Server -> Firecrawl API (POST /v2/monitor)
         |
         v
-   Celery Queue: "url_poll" task
+   Firecrawl handles:
+   - Scheduling (cron/natural language)
+   - Scraping (with JS rendering, cookies, headers)
+   - Content extraction (AI-powered)
+   - Change detection (hash comparison)
+   - Diff computation (text + JSON + AI judging)
+   - Webhook delivery (monitor.page, monitor.check.completed)
         |
         v
-   Polling Worker:
-     a. HTTP GET (with configurable headers, cookies, JS rendering)
-     b. Content normalization (strip ads, nav, whitespace)
-     c. SHA-256 hash computation
-     d. Hash comparison with last_hash
+   Our backend receives webhooks -> stores in PostgreSQL
         |
         v
-   IF hash differs:
-     - Publish to "url_diff" queue
-     - Update last_hash, last_checked in DB
-   ELSE:
-     - Skip (no change)
+   Web UI polls API -> displays diffs, notifications, analytics
 
-2. DIFF PROCESSING:
-   Celery Queue: "url_diff" task
+2. FALLBACK PATH (Self-Hosted):
+   User creates monitor via Web UI
         |
         v
-   Diff Worker:
-     a. Fetch previous snapshot from DB
-     b. Run diff algorithm (line-level + semantic)
-     c. Store new snapshot
-     d. Store diff result
+   FastAPI Server -> stores config in PostgreSQL
         |
         v
-   Notification Service:
-     a. Evaluate notification rules
-     b. Send email/webhook/Slack
-     c. Update notification log
-
-3. USER QUERY:
-   Web UI -> API GET /api/v1/urls/{id}/diffs/{from}/{to}
+   Celery Beat -> polls URLs on schedule
         |
         v
-   API Server -> Query DB for snapshots
+   Celery Workers:
+   - Fetch URL (Playwright for JS, httpx for static)
+   - Extract content (readability-lxml, trafilatura)
+   - Compute diff (difflib, semantic extraction)
+   - Store snapshot + diff in PostgreSQL
         |
         v
-   Return diff JSON or rendered HTML diff
+   Notification Service -> email/webhook/Slack
+        |
+        v
+   Web UI polls API -> displays diffs, notifications, analytics
 ```
 
-### 4.3 Monolith vs Microservices Decision Matrix
+### 5.3 Firecrawl vs Self-Hosted Decision Matrix
 
-| Criterion | Monolith (Recommended) | Microservices |
-|-----------|----------------------|---------------|
-| Team size (1-3) | Excellent | Overkill |
-| Dev speed | Fastest | Slower (network, deployment) |
-| Debugging | Simple (same process) | Complex (distributed tracing) |
-| Deployment | Single deploy | Multiple services |
-| Scaling | Scale as unit | Scale per service |
-| Data consistency | ACID via DB | Eventual consistency |
-| Operational cost | Low | High |
-| Failure isolation | None (process-wide) | Good (service isolation) |
-| Future decomposition | Clear module boundaries | N/A |
-
-**Recommendation:** Start with modular monolith. Extract the Polling Worker as a separate service when you hit >1000 URLs or need independent scaling.
+| Criterion | Firecrawl (Primary) | Self-Hosted (Fallback) |
+|-----------|-------------------|----------------------|
+| Development speed | Fast (API integration) | Slow (custom engine) |
+| Diff quality | Excellent (AI judging) | Good (heuristic rules) |
+| Structured extraction | Excellent (JSON-mode) | Good (custom schemas) |
+| Cost at scale | Credit-based ($0.01-0.05/scrape) | Infrastructure-only |
+| Self-hosting | No | Yes |
+| Vendor lock-in | High | None |
+| Customization | Limited (API constraints) | Full control |
+| Air-gapped/on-prem | No | Yes |
+| Maintenance | None (managed service) | High (self-managed) |
+| Best for | Most users, low/medium frequency | High-frequency, cost-sensitive, air-gapped |
 
 ---
 
-## 5. CHANGE DETECTION STRATEGIES
+## 6. FIRECRAWL INTEGRATION DESIGN
 
-### 5.1 Strategy Comparison
-
-| Strategy | How It Works | Pros | Cons | Best For |
-|----------|-------------|------|------|----------|
-| **Hash-based polling** | Compute SHA-256 of content, compare with last hash | Simple, reliable, efficient | Misses changes if hash function is too strong | General purpose |
-| **DOM-based diffing** | Parse HTML into DOM tree, compare nodes | Captures structural changes | Complex, slow | Structured pages |
-| **Visual diffing** | Take screenshots, compare pixel-by-pixel | Shows exactly what changed | Heavy storage, slow | Visual changes |
-| **XPath/CSS filtering** | Extract specific elements, compare | Precise, ignores noise | Requires per-URL config | Targeted monitoring |
-| **MutationObserver** | Browser extension watches for DOM changes | Real-time, no polling | Requires browser extension | Personal use |
-| **RSS/Atom feed** | Monitor feed for new entries | Simple, standardized | Only works for sites with feeds | Blogs, news |
-| **API polling** | Poll REST/GraphQL APIs | Structured data, reliable | Only works for API endpoints | API monitoring |
-
-### 5.2 Recommended Approach: Multi-Layer Detection
-
-The recommended approach combines multiple strategies:
-
-1. **Primary: Hash-based polling** (fast change detection)
-   - Compute SHA-256 of extracted text content
-   - If hash differs, trigger full diff pipeline
-   - Configurable interval per URL (5 min to 24 hours)
-
-2. **Secondary: Content extraction** (meaningful diffing)
-   - Use readability-lxml to extract main content
-   - Strip navigation, ads, footers, timestamps
-   - Normalize whitespace and dynamic elements
-
-3. **Tertiary: Targeted extraction** (precision)
-   - XPath/CSS selectors for specific elements
-   - JSON path extraction for API responses
-   - Configurable per URL
-
-4. **Optional: JS-rendered pages** (dynamic content)
-   - Playwright for JavaScript-heavy pages
-   - Configurable per URL (enabled/disabled)
-   - Wait for specific elements to load
-
-### 5.3 Polling Interval Strategy
-
-```
-Interval tiers:
-- Critical (1 min):    Price pages, stock availability, incident reports
-- High (5 min):        Job listings, news updates, regulatory pages
-- Medium (30 min):     Blog posts, product pages, pricing pages
-- Low (2 hours):       Terms of service, policy pages, documentation
-- Custom (N min):      User-defined interval
-
-Smart scheduling:
-- Adaptive intervals: Increase interval after periods of no change
-- Burst protection: Limit concurrent polls to prevent IP bans
-- Rate limiting: Per-URL rate limits based on target site policies
-- Respect robots.txt: Optional compliance with site policies
-```
-
----
-
-## 6. CONTENT EXTRACTION & NORMALIZATION
-
-### 6.1 Extraction Pipeline
-
-```
-Raw HTML
-    |
-    v
-[1] HTTP Fetch (with headers, cookies, JS rendering if needed)
-    |
-    v
-[2] HTML Cleaning (html5lib parser, remove scripts/styles)
-    |
-    v
-[3] Content Extraction (readability-lxml OR trafilatura)
-    |
-    v
-[4] Targeted Extraction (XPath/CSS selectors, JSON path)
-    |
-    v
-[5] Normalization (whitespace, dynamic elements, sorting)
-    |
-    v
-[6] Hash Computation (SHA-256 of normalized text)
-    |
-    v
-[7] Store (raw HTML + extracted text + metadata)
-```
-
-### 6.2 Extraction Libraries Comparison
-
-| Library | Language | Strengths | Weaknesses | Best For |
-|---------|----------|-----------|------------|----------|
-| **readability-lxml** | Python | Mozilla's Readability algorithm, excellent article extraction | May miss non-article content | Blog posts, articles, news |
-| **trafilatura** | Python | Multi-language support, markdown output, metadata extraction | Less refined for some page types | Multilingual sites, structured content |
-| **BeautifulSoup** | Python | Flexible, handles malformed HTML, easy to use | No built-in content extraction | Custom extraction rules |
-| **lxml** | Python | Fast, XPath support, HTML5 parsing | Lower-level API, more code | Performance-critical extraction |
-| **cheerio** | Node.js | jQuery-like API, fast | No semantic extraction | Node.js-based pipelines |
-| **Playwright** | Python/Node | Full browser, JS rendering, screenshots | Slow, heavy resource usage | Dynamic/JS-heavy pages |
-
-### 6.3 Recommended Extraction Strategy
-
-**Default pipeline:** readability-lxml (for article-style content) + BeautifulSoup fallback (for other pages)
-
-**Per-URL override:** Users can specify:
-- Extraction method (readability, trafilatura, custom)
-- XPath/CSS selectors for targeted extraction
-- JSON path for API responses
-- Custom normalization rules
-
-### 6.4 Normalization Rules
+### 6.1 API Integration Points
 
 ```python
-# Dynamic element removal
-- Timestamps/dates (regex-based)
-- Random IDs/classes
-- Session tokens in URLs
-- Ad tracking parameters
+# Primary endpoints we integrate with:
 
-# Whitespace normalization
-- Collapse multiple whitespace to single space
-- Normalize line endings
-- Strip leading/trailing whitespace
-
-# Sorting normalization
-- Sort list items if order is irrelevant
-- Sort JSON keys for consistent hashing
-- Normalize date formats to canonical form
-
-# Content filtering
-- Remove elements matching CSS selectors
-- Remove elements with specific text patterns
-- Keep only specified elements (whitelist mode)
-```
-
----
-
-## 7. DIFF ALGORITHMS & DELTA COMPUTATION
-
-### 7.1 Diff Algorithm Comparison
-
-| Algorithm | Granularity | Speed | Quality | Library | Best For |
-|-----------|------------|-------|---------|---------|----------|
-| **Line-level** | Line | Fast | Moderate | difflib (Python), diff (Node.js) | Text content, code |
-| **Word-level** | Word | Medium | Good | python-Levenshtein, diff-match-patch | Fine-grained changes |
-| **Paragraph-level** | Paragraph | Medium | Good | Custom (split by \n\n) | Article content |
-| **DOM-level** | Node | Slow | Excellent | Custom (tree diff) | HTML structure |
-| **Semantic** | Field/Concept | Slow | Best | Custom (pattern matching) | Prices, dates, structured data |
-| **Visual** | Pixel | Very Slow | Excellent | Custom (image diff) | Layout changes |
-
-### 7.2 Recommended Diff Pipeline
-
-```
-Extracted Text
-    |
-    v
-[1] Paragraph-level diff (split by \n\n, use SequenceMatcher)
-    |
-    v
-[2] Word-level diff within changed paragraphs (Levenshtein)
-    |
-    v
-[3] Semantic extraction (regex for prices, dates, numbers)
-    |
-    v
-[4] Structured diff output (JSON with changes array)
-    |
-    v
-[5] Render for UI (HTML diff with colors, unified/side-by-side views)
-```
-
-### 7.3 Diff Output Format
-
-```json
-{
-  "diff_id": "diff-001",
-  "url_id": "url-001",
-  "snapshot_from": "snap-001",
-  "snapshot_to": "snap-002",
-  "timestamp": "2026-05-28T12:05:00Z",
-  "summary": "Price changed from $19.99 to $14.99; Stock: In Stock -> Out of Stock",
-  "change_count": 3,
-  "lines_added": 5,
-  "lines_removed": 3,
-  "changes": [
-    {
-      "type": "value_changed",
-      "field": "price",
-      "old": "$19.99",
-      "new": "$14.99",
-      "context": "Product price on Amazon",
-      "line_from": 15,
-      "line_to": 15,
-      "unified_diff": "- Price: $19.99\n+ Price: $14.99"
-    },
-    {
-      "type": "value_changed",
-      "field": "stock",
-      "old": "In Stock",
-      "new": "Out of Stock",
-      "context": "Availability status",
-      "line_from": 16,
-      "line_to": 16,
-      "unified_diff": "- Stock: In Stock\n+ Stock: Out of Stock"
+# 1. Create monitor (scrape or crawl)
+POST /v2/monitor
+Body: {
+    "name": "Monitor Name",
+    "schedule": {"cron": "*/30 * * * *", "timezone": "UTC"},
+    "goal": "Alert when price changes",  # AI judging prompt
+    "targets": [{
+        "type": "scrape",  # or "crawl"
+        "urls": ["https://example.com/pricing"],
+        "scrapeOptions": {
+            "formats": ["markdown"],  # or ["json"] for structured
+            "maxAge": 0
+        }
+    }],
+    "notification": {
+        "email": {"enabled": True, "recipients": [...]}
     }
-  ],
-  "unified_diff": "@@ -14,7 +14,7 @@\n- Product: Widget Pro\n- Price: $19.99\n- Stock: In Stock\n+ Product: Widget Pro\n+ Price: $14.99\n+ Stock: Out of Stock",
-  "significance": "high"
+}
+
+# 2. List monitors
+GET /v2/monitor
+
+# 3. Get monitor details
+GET /v2/monitor/{monitorId}
+
+# 4. Update monitor
+PUT /v2/monitor/{monitorId}
+
+# 5. Delete monitor
+DELETE /v2/monitor/{monitorId}
+
+# 6. List checks
+GET /v2/monitor/{monitorId}/checks?limit=25&status=changed
+
+# 7. Get check details
+GET /v2/monitor/{monitorId}/checks/{checkId}
+
+# 8. Run monitor immediately
+POST /v2/monitor/{monitorId}/run
+```
+
+### 6.2 Webhook Integration
+
+Firecrawl sends two webhook events:
+
+```python
+# Event 1: monitor.page (per-page, as each scrape finishes)
+{
+    "success": True,
+    "type": "monitor.page",
+    "data": [{
+        "monitorId": "...",
+        "checkId": "...",
+        "url": "https://example.com/pricing",
+        "status": "changed",  # same, new, changed, removed, error
+        "isMeaningful": True,
+        "judgment": {
+            "meaningful": True,
+            "confidence": "high",
+            "reason": "The Starter plan price changed.",
+            "meaningfulChanges": [...]
+        },
+        "diff": {
+            "text": "--- previous\n+++ current\n...",
+            "json": {"plans[0].price": {"previous": "$19/mo", "current": "$24/mo"}}
+        },
+        "snapshot": {"json": {...}}
+    }]
+}
+
+# Event 2: monitor.check.completed (after full check reconciled)
+{
+    "success": True,
+    "type": "monitor.check.completed",
+    "data": [{
+        "monitorId": "...",
+        "checkId": "...",
+        "status": "completed",
+        "summary": {
+            "totalPages": 2,
+            "same": 1,
+            "changed": 1,
+            "new": 0,
+            "removed": 0,
+            "error": 0
+        }
+    }]
 }
 ```
 
-### 7.4 Diff Display Libraries
+### 6.3 Our Webhook Handler
 
-| Library | Language | Stars | Features | Best For |
-|---------|----------|-------|----------|----------|
-| **diff2html** | JS/TS | ~3K+ | Unified/side-by-side, syntax highlighting, RTL | React/JS frontend |
-| **monaco-editor** | JS/TS | ~40K+ | VS Code editor, diff mode, syntax highlighting | Code-heavy diffs |
-| **react-diff-viewer-v2** | React | ~1K+ | Simple API, word/line diffs, clean UI | Quick implementation |
-| **jsdiff** | JS/TS | ~9K+ | Text differencing implementation | Backend diff computation |
-| **diff-match-patch** | Multiple | ~8K+ | Google's library, high performance | Cross-language diffing |
-| **go-diff** | Go | ~2K+ | Text diff/match/patch in Go | Go-based backends |
+```python
+# app/api/webhooks.py
 
-**Recommendation:** diff2html for the frontend (rich features, good React integration), jsdiff for backend computation (Python has difflib, but jsdiff is available via PyJS or we use Python's difflib).
-
----
-
-## 8. BACKEND TECH STACK EVALUATION
-
-### 8.1 Python (FastAPI) — RECOMMENDED
-
-**Pros:**
-- **HTML parsing ecosystem:** BeautifulSoup, lxml, readability-lxml, trafilatura — unmatched in Python
-- **Content extraction:** readability-lxml for article extraction, trafilatura for text extraction
-- **Async support:** FastAPI is async-native (Starlette + uvicorn)
-- **Task queue:** Celery is the most mature Python task queue with Redis/RabbitMQ backends
-- **Database ORM:** SQLAlchemy 2.0 has excellent async support
-- **Diff libraries:** difflib (stdlib), python-Levenshtein, textblob for semantic comparison
-- **Auto-generated OpenAPI docs:** Perfect for API-first SaaS
-- **Community:** Huge community, many existing integrations
-
-**Cons:**
-- GIL limits CPU-bound parallelism (mitigated by async I/O and multiprocessing in Celery)
-- Slower raw performance vs Go/Node for pure HTTP serving (but this is I/O-bound, not CPU-bound)
-
-### 8.2 Node.js (Express/NestJS)
-
-**Pros:**
-- **Async model:** Native async/await, event loop handles thousands of concurrent connections
-- **HTML parsing:** cheerio (jQuery-like), jsdom (full browser DOM)
-- **Unified language:** JavaScript/TypeScript across frontend and backend
-- **Real-time:** Native WebSocket support via ws or socket.io
-
-**Cons:**
-- **HTML parsing quality:** cheerio lacks semantic extraction quality of Python's readability-lxml
-- **Content extraction:** No equivalent to readability-lxml or trafilatura
-- **Diff libraries:** diff npm package is basic, no semantic diffing out of the box
-
-### 8.3 Go
-
-**Pros:**
-- **Performance:** Excellent for concurrent HTTP polling (goroutines are lightweight)
-- **Deployment:** Single binary, no runtime dependencies
-- **Memory:** Very low memory footprint per worker
-
-**Cons:**
-- **HTML parsing:** goquery exists but ecosystem is thin compared to Python
-- **Content extraction:** Would need to implement or port extraction logic
-- **Development speed:** Slower iteration than Python for prototyping
-
-### 8.4 Final Recommendation
-
-**Go with Python (FastAPI) as the primary backend.**
-
-Justification:
-1. **Content extraction is the core differentiator.** Python's readability-lxml, trafilatura, and BeautifulSoup provide production-quality HTML cleaning and article extraction.
-2. **FastAPI's async model** handles the I/O-bound polling workload well.
-3. **Celery + Redis** provides a battle-tested task queue.
-4. **FastAPI auto-generates OpenAPI docs** — critical for a SaaS product.
-
----
-
-## 9. FRONTEND TECH STACK EVALUATION
-
-### 9.1 Recommended Stack
-
-**React 18+ + TypeScript + Vite + diff2html + TailwindCSS**
-
-Justification:
-1. **diff2html** provides the best balance of features and ease of use:
-   - Unified and side-by-side views
-   - Syntax highlighting
-   - RTL support
-   - Rich customization options
-
-2. **monaco-editor** as an alternative view mode for code-heavy pages:
-   - Toggle between "visual diff" and "code diff"
-   - Monaco's diff editor is the gold standard for code comparison
-
-3. **TailwindCSS** for rapid, consistent styling
-
-4. **Zustand** for state management (lightweight) or **TanStack Query** for server state caching
-
-5. **React Router v6** for routing
-
-### 9.2 Diff Display UI Components
-
+@app.post("/api/v1/webhooks/firecrawl")
+async def firecrawl_webhook(request: Request):
+    """Receive and process Firecrawl monitor webhooks."""
+    payload = await request.json()
+    event_type = payload.get("type")
+    
+    if event_type == "monitor.page":
+        for page in payload["data"]:
+            await store_check_result(page)
+            await trigger_notifications(page)
+    
+    elif event_type == "monitor.check.completed":
+        for check in payload["data"]:
+            await store_check_summary(check)
+            await trigger_notifications(check)
+    
+    return {"success": True}
 ```
-+----------------------------------------------------------+
-|  URL: example.com/product-page                           |
-|  Last checked: 2 min ago  |  Interval: 5 min  |  [Refresh]|
-+----------------------------------------------------------+
-|  [Unified] [Side-by-Side] [Semantic] [Code]              |
-+----------------------------------------------------------+
-|  +----------------------------------------------------+  |
-|  |  <del>- Price: $19.99                            </del>|
-|  |  <ins>+ Price: $14.99                            </ins>|
-|  |  <del>- Stock: In Stock                          </del>|
-|  |  <ins>+ Stock: Out of Stock                      </ins>|
-|  +----------------------------------------------------+  |
-+----------------------------------------------------------+
-|  +----------------------------------------------------+  |
-|  |  Semantic Diff                                     |  |
-|  |  Price changed: $19.99 -> $14.99 (-25%)            |  |
-|  |  Stock status changed: In Stock -> Out of Stock    |  |
-|  +----------------------------------------------------+  |
-+----------------------------------------------------------+
-|  [Snapshot Timeline]                                     |
-|  O---O---O---O---O---O---O---O---O---O                    |
-|  Jan Feb Mar Apr May Jun Jul Aug Sep Oct                 |
-+----------------------------------------------------------+
+
+### 6.4 Firecrawl Monitor Model
+
+```python
+# app/models/firecrawl_monitor.py
+
+class FirecrawlMonitor(BaseModel):
+    """Maps our internal monitor to Firecrawl's monitor."""
+    id: UUID
+    firecrawl_monitor_id: str  # Firecrawl's monitor ID
+    name: str
+    url: str
+    interval_seconds: int
+    enabled: bool
+    schedule_type: str  # "firecrawl" or "selfhosted"
+    firecrawl_config: JSONB  # Raw Firecrawl API config
+    last_check_id: str
+    last_check_at: datetime
+    estimated_credits_per_month: int
+    
+    # Computed fields
+    total_checks: int
+    total_changes: int
+    last_change_at: datetime
 ```
 
 ---
 
-## 10. DATABASE SCHEMA DESIGN
+## 7. SELF-HOSTED FALLBACK DESIGN
 
-### 10.1 Entity Relationship Diagram
+### 7.1 When to Use Self-Hosted
+
+The self-hosted fallback is for:
+- High-frequency monitoring (5 min intervals) where Firecrawl credits are cost-prohibitive
+- Air-gapped or on-premise deployments where external API calls are not allowed
+- Users who want full control over extraction, diffing, and storage
+- Cost-sensitive deployments where credit-based pricing is unsustainable
+
+### 7.2 Self-Hosted Pipeline
+
+```
++----------------------------------------------------------+
+|                 SCHEDULER (Main Process)                    |
+|  APScheduler: runs every 10 seconds                        |
+|  - Queries DB for URLs where next_check <= NOW()           |
+|  - Batches URLs into chunks (max 50 per batch)             |
+|  - Publishes tasks to Celery queue                          |
++----------------------------------------------------------+
+                          |
+                          v
++----------------------------------------------------------+
+|              CELERY QUEUE (Redis)                           |
+|  url_poll: {url_id, tenant_id, attempt}                   |
+|  url_diff: {snapshot_from_id, snapshot_to_id}             |
+|  url_notify: {diff_id, tenant_id, rules}                  |
++----------------------------------------------------------+
+                          |
+          +---------------+---------------+
+          v               v               v
+   +----------+  +----------+  +----------+
+   | Worker 1 |  | Worker 2 |  | Worker N |
+   | (poll)   |  | (poll)   |  | (poll)   |
+   +----------+  +----------+  +----------+
+
+Each worker:
+  1. Fetch URL (Playwright for JS, httpx for static)
+  2. Extract content (readability-lxml, trafilatura)
+  3. Compute hash (SHA-256 of normalized text)
+  4. Compare with last_hash
+  5. If changed: compute diff (difflib, semantic)
+  6. Store snapshot + diff in PostgreSQL
+  7. Trigger notifications
+```
+
+### 7.3 Self-Hosted Components
+
+```python
+# app/workers/polling.py
+async def poll_url(url_id: UUID):
+    """Fetch URL, extract content, compute diff."""
+    url = await get_url(url_id)
+    
+    # Step 1: Fetch
+    if url.js_required:
+        content = await fetch_with_playwright(url.url, url.headers)
+    else:
+        content = await fetch_with_httpx(url.url, url.headers)
+    
+    # Step 2: Extract
+    extracted = await extract_content(content, url.extraction_method)
+    
+    # Step 3: Hash
+    content_hash = hashlib.sha256(extracted.encode()).hexdigest()
+    
+    # Step 4: Compare
+    if content_hash == url.last_hash:
+        return  # No change
+    
+    # Step 5: Diff
+    previous_snapshot = await get_latest_snapshot(url_id)
+    diff = await compute_diff(previous_snapshot.extracted_text, extracted)
+    
+    # Step 6: Store
+    await store_snapshot(url_id, content, extracted, content_hash)
+    await store_diff(url_id, previous_snapshot.id, diff)
+    
+    # Step 7: Notify
+    await trigger_notifications(url_id, diff)
+```
+
+### 7.4 Extraction Methods
+
+| Method | Library | Best For |
+|--------|---------|----------|
+| readability-lxml | Mozilla's Readability | Articles, blogs, news |
+| trafilatura | Multi-language | Multilingual sites, structured content |
+| custom XPath | lxml | Targeted element extraction |
+| JSON path | jsonpath-ng | API responses, structured data |
+
+### 7.5 Diff Engine
+
+```python
+# app/core/diff_engine.py
+
+async def compute_diff(previous_text: str, current_text: str) -> DiffResult:
+    """Compute diff between two text snapshots."""
+    
+    # Line-level diff
+    line_diff = difflib.unified_diff(
+        previous_text.splitlines(),
+        current_text.splitlines(),
+        lineterm=""
+    )
+    
+    # Semantic extraction (prices, dates, stock levels)
+    semantic_changes = await extract_semantic_changes(previous_text, current_text)
+    
+    return DiffResult(
+        unified_diff="\n".join(line_diff),
+        semantic_changes=semantic_changes,
+        lines_added=len([l for l in line_diff if l.startswith("+")]),
+        lines_removed=len([l for l in line_diff if l.startswith("-")]),
+    )
+```
+
+---
+
+## 8. DATABASE SCHEMA DESIGN
+
+### 8.1 Entity Relationship Diagram
 
 ```
 +--------------+       +--------------+       +------------------+
@@ -682,7 +686,7 @@ Justification:
 | id (PK)      |1    n| id (PK)          |
 | tenant_id(FK)|-------| url_id (FK)      |
 | name         |       | content_hash     |
-| url          |       | content          |  <- large text/blob
+| url          |       | content          |  <- raw HTML (S3) or text
 | interval_sec |       | extracted_text   |  <- cleaned text
 | enabled      |       | content_type     |
 | last_checked |       | status           |
@@ -693,12 +697,13 @@ Justification:
 | js_required  |       1    n
 | max_retries  |       +------------------+
 | user_agent   |       |  url_diffs       |
+| backend      |       +------------------+
 +--------------+       +------------------+
                        +------------------+
                        | id (PK)          |
                        | snapshot_from(FK)|
                        | snapshot_to (FK) |
-                       | diff_type        |  <- unified|semantic
+                       | diff_type        |  <- unified|semantic|json
                        | diff_content     |  <- JSON
                        | diff_size        |
                        | created_at       |
@@ -731,161 +736,65 @@ Justification:
                            +------------------+
 ```
 
-### 10.2 Detailed Table Definitions
+### 8.2 Key Table Additions for Firecrawl
 
 ```sql
--- Users table (for multi-user SaaS)
-CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    display_name VARCHAR(100),
-    is_active BOOLEAN DEFAULT TRUE,
-    is_admin BOOLEAN DEFAULT FALSE,
-    email_verified BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
+-- URLs table (added backend column)
+ALTER TABLE urls ADD COLUMN backend VARCHAR(20) DEFAULT 'firecrawl';
+-- Values: 'firecrawl' (primary), 'selfhosted' (fallback)
 
--- Tenants/Organizations (for multi-tenant SaaS)
-CREATE TABLE tenants (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(255) NOT NULL,
-    slug VARCHAR(100) UNIQUE NOT NULL,
-    plan VARCHAR(50) DEFAULT 'free',
-    max_urls INT DEFAULT 10,
-    max_snapshots_per_url INT DEFAULT 30,
-    max_diffs_per_url INT DEFAULT 10,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- URLs to monitor
-CREATE TABLE urls (
+-- Firecrawl monitor mapping
+CREATE TABLE firecrawl_monitors (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
-    name VARCHAR(255) NOT NULL,
-    url VARCHAR(2048) NOT NULL,
-    normalized_url VARCHAR(2048) NOT NULL,
-    interval_seconds INT DEFAULT 300,
-    enabled BOOLEAN DEFAULT TRUE,
-    last_checked TIMESTAMPTZ,
-    last_hash VARCHAR(64),
-    next_check TIMESTAMPTZ,
-    headers JSONB DEFAULT '{}',
-    cookies JSONB DEFAULT '{}',
-    js_required BOOLEAN DEFAULT FALSE,
-    max_retries INT DEFAULT 3,
-    user_agent VARCHAR(255),
-    tags TEXT[] DEFAULT '{}',
+    url_id UUID REFERENCES urls(id) ON DELETE CASCADE,
+    firecrawl_monitor_id VARCHAR(100) NOT NULL,  -- Firecrawl's ID
+    firecrawl_config JSONB NOT NULL,              -- Raw API config
+    status VARCHAR(20) DEFAULT 'active',          -- active, paused, error
+    last_check_id VARCHAR(100),
+    last_check_at TIMESTAMPTZ,
+    estimated_credits_per_month INT DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(tenant_id, normalized_url)
+    UNIQUE(firecrawl_monitor_id)
 );
 
--- Content snapshots
-CREATE TABLE url_snapshots (
+-- Check results (from Firecrawl webhooks or self-hosted polling)
+CREATE TABLE check_results (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     url_id UUID REFERENCES urls(id) ON DELETE CASCADE,
-    content_hash VARCHAR(64) NOT NULL,
-    content TEXT,
-    extracted_text TEXT,
-    content_type VARCHAR(50),
-    status VARCHAR(20) DEFAULT 'success',
-    error_message TEXT,
-    snapshot_size INT,
-    content_length INT,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    INDEX idx_snapshots_url_created (url_id, created_at DESC)
-);
-
--- Diff records (link two snapshots)
-CREATE TABLE url_diffs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    url_id UUID REFERENCES urls(id) ON DELETE CASCADE,
-    snapshot_from UUID REFERENCES url_snapshots(id),
-    snapshot_to UUID REFERENCES url_snapshots(id),
-    diff_type VARCHAR(20) DEFAULT 'unified',
-    diff_content JSONB NOT NULL,
+    check_id VARCHAR(100),  -- Firecrawl check ID or local ID
+    backend VARCHAR(20) DEFAULT 'firecrawl',
+    status VARCHAR(20) DEFAULT 'completed',  -- same, changed, new, removed, error
+    is_meaningful BOOLEAN,  -- Firecrawl AI judgment
+    judgment JSONB,  -- Firecrawl judgment: {meaningful, confidence, reason, meaningfulChanges}
+    diff_text TEXT,  -- Unified diff
+    diff_json JSONB,  -- JSON-mode diff
     diff_size INT,
-    is_significant BOOLEAN DEFAULT TRUE,
+    snapshot_json JSONB,  -- Snapshot data
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    INDEX idx_diffs_url_created (url_id, created_at DESC)
+    INDEX idx_results_url_status (url_id, created_at DESC)
 );
-
--- Notification rules per URL
-CREATE TABLE notification_rules (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    url_id UUID REFERENCES urls(id) ON DELETE CASCADE,
-    tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
-    type VARCHAR(20) NOT NULL,
-    channel VARCHAR(255) NOT NULL,
-    enabled BOOLEAN DEFAULT TRUE,
-    config JSONB DEFAULT '{}',
-    min_diff_size INT,
-    cooldown_seconds INT DEFAULT 300,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- API keys
-CREATE TABLE api_keys (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
-    key_hash VARCHAR(64) NOT NULL,
-    prefix VARCHAR(10) NOT NULL,
-    name VARCHAR(100),
-    permissions TEXT[] DEFAULT '{"read"}',
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    last_used_at TIMESTAMPTZ
-);
-
--- Audit log
-CREATE TABLE audit_log (
-    id BIGSERIAL PRIMARY KEY,
-    tenant_id UUID REFERENCES tenants(id) ON DELETE SET NULL,
-    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-    action VARCHAR(100) NOT NULL,
-    resource_type VARCHAR(50),
-    resource_id UUID,
-    details JSONB,
-    ip_address INET,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Indexes
-CREATE INDEX idx_urls_tenant_enabled ON urls(tenant_id, enabled);
-CREATE INDEX idx_urls_next_check ON urls(next_check) WHERE enabled = TRUE;
-CREATE INDEX idx_snapshots_hash ON url_snapshots(content_hash);
-CREATE INDEX idx_notification_rules_tenant ON notification_rules(tenant_id, enabled);
 ```
 
-### 10.3 Storage Strategy for Snapshots
+### 8.3 Storage Strategy
 
 ```
-Decision: Store raw HTML in object storage (S3/MinIO), not in PostgreSQL.
-
-Rationale:
-- HTML content can be large (100KB-5MB per snapshot)
-- PostgreSQL TEXT fields are fine for moderate sizes, but object storage
-  scales better and is cheaper for large blobs
-- Keep extracted_text (cleaned) in PostgreSQL for diff queries
-- Keep diff_content (JSON) in PostgreSQL — it's small and queried frequently
+Decision: Store diff results in PostgreSQL, raw HTML in S3/MinIO.
 
 Storage hierarchy:
++-- check_results.diff_text -> PostgreSQL TEXT (unified diff)
++-- check_results.diff_json -> PostgreSQL JSONB (JSON-mode diff)
++-- check_results.snapshot_json -> PostgreSQL JSONB (snapshot data)
 +-- url_snapshots.content -> S3/MinIO (raw HTML, compressed)
-+-- url_snapshots.extracted_text -> PostgreSQL TEXT (cleaned, diff-ready)
-+-- url_diffs.diff_content -> PostgreSQL JSONB (structured diff)
-+-- url_snapshots.content_hash -> PostgreSQL VARCHAR(64) (index)
++-- url_snapshots.extracted_text -> PostgreSQL TEXT (cleaned text)
 ```
 
 ---
 
-## 11. API DESIGN
+## 9. API DESIGN
 
-### 11.1 RESTful API Endpoints
+### 9.1 RESTful API Endpoints
 
 ```
 BASE: /api/v1
@@ -921,19 +830,16 @@ PATCH  /urls/:id/disable           # Disable monitoring
 POST   /urls/:id/check-now         # Trigger immediate check
 GET    /urls/:id/health            # URL health status
 
-=== SNAPSHOTS ===
-GET    /urls/:id/snapshots         # List snapshots (paginated)
-GET    /urls/:id/snapshots/:snap_id  # Get snapshot details
-GET    /urls/:id/snapshots/:snap_id/raw  # Get raw HTML (from S3)
-GET    /urls/:id/snapshots/:snap_id/text  # Get extracted text
-DELETE /urls/:id/snapshots         # Prune old snapshots
+=== CHECKS (unified across Firecrawl + self-hosted) ===
+GET    /urls/:id/checks            # List checks (paginated, filterable)
+GET    /urls/:id/checks/:check_id  # Get check details
+GET    /urls/:id/checks/:check_id/diff  # Get rendered diff
 
 === DIFFS ===
 GET    /urls/:id/diffs             # List diffs
 GET    /urls/:id/diffs/:id         # Get specific diff
 GET    /urls/:id/diffs/:id/rendered  # Get rendered HTML diff
 GET    /urls/:id/diffs/:id/download  # Download diff as HTML/JSON
-POST   /urls/:id/diffs/compute     # Force recompute diff
 
 === NOTIFICATIONS ===
 POST   /notifications/rules       # Create notification rule
@@ -946,21 +852,154 @@ POST   /notifications/rules/:id/test  # Test notification
 GET    /admin/health               # System health check
 GET    /admin/stats                # Platform statistics
 GET    /admin/urls-overview        # All URLs status overview
-GET    /admin/worker-status        # Celery worker health
+GET    /admin/worker-status        # Celery worker health (self-hosted only)
 GET    /admin/config               # System configuration
 PUT    /admin/config               # Update system configuration
 GET    /admin/audit-log            # Audit log (admin)
+
+=== ANALYTICS ===
+GET    /urls/:id/analytics         # Change frequency, trends, anomalies
+GET    /urls/analytics             # Platform-wide analytics
+GET    /urls/analytics/export      # Export analytics data
+
+=== WEBHOOKS ===
+POST   /webhooks/firecrawl         # Firecrawl webhook endpoint
+POST   /webhooks/:id               # Trigger webhook (admin)
+GET    /webhooks/:id/logs          # Webhook delivery logs
 
 === EXPORT ===
 GET    /urls/:id/export            # Export all snapshots/diffs
 GET    /urls/export                # Bulk export (all URLs)
 ```
 
+### 9.2 Request/Response Examples
+
+```json
+// POST /api/v1/urls
+// Request:
+{
+  "name": "Amazon Product Page",
+  "url": "https://www.amazon.com/dp/B08N5WRWNW",
+  "interval_seconds": 300,
+  "enabled": true,
+  "backend": "firecrawl",  // or "selfhosted"
+  "firecrawl_config": {
+    "goal": "Alert when price or stock status changes",
+    "schedule": {"text": "every 5 minutes", "timezone": "UTC"},
+    "scrapeOptions": {
+      "formats": ["markdown"]
+    }
+  },
+  "tags": ["price-tracking", "amazon"],
+  "notification_rules": [
+    {
+      "type": "email",
+      "channel": "alerts@example.com",
+      "enabled": true
+    }
+  ]
+}
+
+// Response (201 Created):
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "Amazon Product Page",
+  "url": "https://www.amazon.com/dp/B08N5WRWNW",
+  "interval_seconds": 300,
+  "enabled": true,
+  "backend": "firecrawl",
+  "last_checked": null,
+  "last_hash": null,
+  "next_check": "2026-05-28T12:00:00Z",
+  "tags": ["price-tracking", "amazon"],
+  "status": "active",
+  "created_at": "2026-05-28T11:55:00Z",
+  "snapshot_count": 0,
+  "firecrawl_monitor_id": "019df960-06e7-7383-9d89-82c0113dc31a",
+  "notification_rules": [...]
+}
+
+// GET /api/v1/urls/:id/checks
+// Response (200 OK):
+{
+  "data": [
+    {
+      "id": "check-001",
+      "check_id": "019df960-5f2a-75fb-a98b-bd2d32ca67d4",
+      "backend": "firecrawl",
+      "status": "changed",
+      "is_meaningful": true,
+      "judgment": {
+        "meaningful": true,
+        "confidence": "high",
+        "reason": "The Starter plan price changed."
+      },
+      "diff_size": 5,
+      "created_at": "2026-05-28T12:05:00Z"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "per_page": 20,
+    "total": 45,
+    "total_pages": 3
+  }
+}
+```
+
 ---
 
-## 12. SECURITY ARCHITECTURE
+## 10. FRONTEND TECH STACK
 
-### 12.1 Threat Model
+### 10.1 Recommended Stack
+
+**React 18+ + TypeScript + Vite + diff2html + TailwindCSS**
+
+Justification:
+1. **diff2html** provides unified and side-by-side diff views
+2. **monaco-editor** as an alternative view mode for code-heavy diffs
+3. **TailwindCSS** for rapid, consistent styling
+4. **Zustand** for state management or **TanStack Query** for server state caching
+5. **React Router v6** for routing
+
+### 10.2 Key UI Components
+
+```
++----------------------------------------------------------+
+|  URL: example.com/product-page                           |
+|  Last checked: 2 min ago  |  Interval: 5 min  |  [Refresh]|
++----------------------------------------------------------+
+|  [Unified] [Side-by-Side] [JSON] [AI Summary]            |
++----------------------------------------------------------+
+|  +----------------------------------------------------+  |
+|  |  <del>- Price: $19.99                            </del>|
+|  |  <ins>+ Price: $14.99                            </ins>|
+|  |  <del>- Stock: In Stock                          </del>|
+|  |  <ins>+ Stock: Out of Stock                      </ins>|
+|  +----------------------------------------------------+  |
++----------------------------------------------------------+
+|  +----------------------------------------------------+  |
+|  |  AI Judgment (Firecrawl)                           |  |
+|  |  Meaningful: Yes (confidence: high)                |  |
+|  |  Reason: The Starter plan price changed.            |  |
+|  +----------------------------------------------------+  |
++----------------------------------------------------------+
+|  [Snapshot Timeline]                                     |
+|  O---O---O---O---O---O---O---O---O---O                    |
+|  Jan Feb Mar Apr May Jun Jul Aug Sep Oct                 |
++----------------------------------------------------------+
+|  [Change Analytics]                                      |
+|  Frequency: 12 changes/month (avg)                       |
+|  Trend: Price decreasing (-$5.00 over 30 days)           |
+|  Anomaly: 3x more changes than usual (last 24h)          |
++----------------------------------------------------------+
+```
+
+---
+
+## 11. SECURITY ARCHITECTURE
+
+### 11.1 Threat Model
 
 | Threat | Mitigation |
 |--------|-----------|
@@ -971,12 +1010,13 @@ GET    /urls/export                # Bulk export (all URLs)
 | Credential theft | bcrypt/argon2 password hashing, JWT RS256, API key rotation, Audit logging |
 | Unauthorized access | RBAC (tenant admin, member, read-only), Tenant ID on every query, CORS restrictions |
 | Content injection | Validate URL scheme (http/https only), Block internal IPs (127.0.0.1, 10.x.x.x), URL allowlist for enterprise |
+| Firecrawl API key leak | Store encrypted in DB, never log, rotate automatically |
 
 ---
 
-## 13. MONITORING, ALERTING & NOTIFICATIONS
+## 12. MONITORING, ALERTING & NOTIFICATIONS
 
-### 13.1 Notification Channels
+### 12.1 Notification Channels
 
 | Channel | Implementation | Details |
 |---------|---------------|---------|
@@ -987,7 +1027,7 @@ GET    /urls/export                # Bulk export (all URLs)
 | Discord | Discord Webhook | Embed format with diff preview |
 | Push (Future) | Firebase Cloud Messaging | Mobile push notifications |
 
-### 13.2 Notification Rules
+### 12.2 Notification Rules
 
 ```json
 {
@@ -995,7 +1035,7 @@ GET    /urls/export                # Bulk export (all URLs)
     "min_diff_size": 5,
     "cooldown_seconds": 300,
     "max_notifications_per_day": 50,
-    "significant_only": true,
+    "significant_only": true,  // Only notify for meaningful changes (Firecrawl)
     "diff_thresholds": {
       "warning": 100,
       "critical": 500
@@ -1006,45 +1046,18 @@ GET    /urls/export                # Bulk export (all URLs)
 
 ---
 
-## 14. PERFORMANCE & SCALABILITY
+## 13. PERFORMANCE & SCALABILITY
 
-### 14.1 Concurrent Polling Architecture
-
-```
-+----------------------------------------------------------+
-|                 SCHEDULER (Main Process)                    |
-|  APScheduler: runs every 10 seconds                        |
-|  - Queries DB for URLs where next_check <= NOW()           |
-|  - Batches URLs into chunks (max 50 per batch)             |
-|  - Publishes tasks to Celery queue                          |
-+----------------------------------------------------------+
-                          |
-                          v
-+----------------------------------------------------------+
-|              CELERY QUEUE (Redis)                           |
-|  url_poll: {url_id, tenant_id, attempt}                   |
-|  url_diff: {snapshot_from_id, snapshot_to_id}             |
-|  url_notify: {diff_id, tenant_id, rules}                  |
-+----------------------------------------------------------+
-                          |
-          +---------------+---------------+
-          v               v               v
-   +----------+  +----------+  +----------+
-   | Worker 1 |  | Worker 2 |  | Worker N |
-   | (poll)   |  | (poll)   |  | (poll)   |
-   +----------+  +----------+  +----------+
-```
-
-### 14.2 Scaling Strategy
+### 13.1 Scaling Strategy
 
 | Phase | URLs | Architecture | Cost |
 |-------|------|-------------|------|
-| Phase 1 | 0-100 | Single FastAPI + 1 Celery worker + PostgreSQL on same host | ~$10/month (VPS) |
-| Phase 2 | 100-1000 | 2 FastAPI instances behind LB, 4-8 Celery workers, Managed PostgreSQL | ~$50-100/month |
-| Phase 3 | 1000-10000 | Kubernetes cluster, PostgreSQL read replicas, S3 for snapshots | ~$500-1000/month |
-| Phase 4 | 10000+ | Microservices decomposition, Multi-region deployment | ~$2000+/month |
+| Phase 1 | 0-100 | Single FastAPI + PostgreSQL on same host | ~$10/month (VPS) + Firecrawl credits |
+| Phase 2 | 100-1000 | 2 FastAPI instances behind LB, Managed PostgreSQL | ~$50-100/month + Firecrawl credits |
+| Phase 3 | 1000-10000 | Kubernetes cluster, PostgreSQL read replicas, S3 | ~$500-1000/month + Firecrawl credits |
+| Phase 4 | 10000+ | Microservices decomposition, Multi-region | ~$2000+/month + Firecrawl credits |
 
-### 14.3 Storage Growth Management
+### 13.2 Storage Growth Management
 
 ```
 Pruning Strategy:
@@ -1054,24 +1067,19 @@ Pruning Strategy:
 |   - Keep last M diffs (configurable, default: 10)         |
 |   - Archive old snapshots to cold storage (S3 Glacier)    |
 |                                                           |
-| Tenant-level:                                             |
-|   - Free plan: 30 snapshots, 10 diffs per URL             |
-|   - Pro plan: 100 snapshots, 50 diffs per URL             |
-|   - Enterprise: unlimited (with storage quota)            |
-|                                                           |
 | Storage Estimation:                                       |
-|   Average snapshot: 100KB (compressed)                    |
-|   100 URLs x 30 snapshots x 100KB = 300MB                 |
-|   1000 URLs x 30 snapshots x 100KB = 3GB                  |
-|   10000 URLs x 30 snapshots x 100KB = 30GB                |
+|   Average diff: 5KB (JSON + text)                         |
+|   100 URLs x 30 snapshots x 5KB = 15MB                    |
+|   1000 URLs x 30 snapshots x 5KB = 150MB                  |
+|   10000 URLs x 30 snapshots x 5KB = 1.5GB                 |
 +----------------------------------------------------------+
 ```
 
 ---
 
-## 15. EXTENSIBILITY & PLUGIN SYSTEM
+## 14. EXTENSIBILITY & PLUGIN SYSTEM
 
-### 15.1 Plugin Architecture
+### 14.1 Plugin Architecture
 
 ```
 +----------------------------------------------------------+
@@ -1093,20 +1101,9 @@ Pruning Strategy:
 +----------------------------------------------------------+
 ```
 
-### 15.2 Plugin Interface (Python Protocol)
+### 14.2 Plugin Interface (Python Protocol)
 
 ```python
-class HTMLParserPlugin(Protocol):
-    name: str
-    priority: int = 100
-    async def parse(self, html: str) -> str:
-        """Extract meaningful text from HTML."""
-
-class DiffEnginePlugin(Protocol):
-    name: str
-    async def compute(self, text_a: str, text_b: str) -> Diff:
-        """Compute diff between two texts."""
-
 class NotificationPlugin(Protocol):
     name: str
     async def send(self, rule: Rule, diff: Diff) -> bool:
@@ -1116,13 +1113,35 @@ class URLValidatorPlugin(Protocol):
     name: str
     async def validate(self, url: str) -> bool:
         """Validate URL before monitoring."""
+
+class AnalyticsPlugin(Protocol):
+    name: str
+    async def compute(self, checks: List[CheckResult]) -> Analytics:
+        """Compute change analytics."""
+```
+
+### 14.3 Firecrawl Plugin
+
+```python
+class FirecrawlMonitorPlugin:
+    """Use Firecrawl's monitoring API as primary backend."""
+    name = "firecrawl-monitor"
+    
+    async def create_monitor(self, url_config: URLConfig) -> FirecrawlMonitor:
+        """Create Firecrawl monitor via API."""
+        response = await self.firecrawl_api.create_monitor(...)
+        return self.map_to_internal(response)
+    
+    async def handle_webhook(self, payload: dict) -> CheckResult:
+        """Process Firecrawl webhook and store results."""
+        return self.transform_payload(payload)
 ```
 
 ---
 
-## 16. DEPLOYMENT & DEVOPS
+## 15. DEPLOYMENT & DEVOPS
 
-### 16.1 Development Environment (Docker Compose)
+### 15.1 Development Environment (Docker Compose)
 
 ```yaml
 # docker-compose.yml
@@ -1137,13 +1156,14 @@ services:
     environment:
       - DATABASE_URL=postgresql://emily:emily@db:5432/emily
       - REDIS_URL=redis://redis:6379/0
+      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
       - SECRET_KEY=dev-secret-key-change-in-prod
     depends_on:
       - db
       - redis
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-  # Celery Worker
+  # Celery Worker (self-hosted fallback only)
   worker:
     build: ./backend
     environment:
@@ -1153,17 +1173,6 @@ services:
       - db
       - redis
     command: celery -A app.celery_app worker --concurrency=4 --loglevel=info
-
-  # Celery Beat (Scheduler)
-  beat:
-    build: ./backend
-    environment:
-      - DATABASE_URL=postgresql://emily:emily@db:5432/emily
-      - REDIS_URL=redis://redis:6379/0
-    depends_on:
-      - db
-      - redis
-    command: celery -A app.celery_app beat --loglevel=info
 
   # Frontend
   frontend:
@@ -1205,30 +1214,30 @@ services:
       - "9001:9001"
 ```
 
-### 16.2 Production Deployment Options
+### 15.2 Production Deployment Options
 
 **Option A: Managed Cloud (Recommended for SaaS)**
 - Cloudflare (DNS + WAF + CDN)
 - AWS Application Load Balancer
 - ECS Fargate (or EKS)
 - RDS PostgreSQL (Multi-AZ), ElastiCache Redis, S3, SES
-- Estimated: $200-500/month
+- Estimated: $200-500/month + Firecrawl credits
 
 **Option B: VPS (Budget)**
 - DigitalOcean / Linode / Hetzner (4GB+ RAM)
 - Docker Compose: FastAPI + Nginx, Celery, PostgreSQL, Redis, MinIO
-- Estimated: $20-40/month
+- Estimated: $20-40/month + Firecrawl credits
 
 **Option C: Kubernetes (Scale)**
 - EKS / GKE / AKS
 - Ingress Controller, Deployments for api-server, celery-worker, celery-beat, frontend
 - RDS PostgreSQL + ElastiCache + S3
 - Prometheus + Grafana (monitoring)
-- Estimated: $500-2000/month
+- Estimated: $500-2000/month + Firecrawl credits
 
 ---
 
-## 17. IMPLEMENTATION ROADMAP
+## 16. IMPLEMENTATION ROADMAP
 
 ### Phase 1: MVP (Weeks 1-4)
 
@@ -1239,20 +1248,20 @@ Week 1: Foundation
   - Auth system (register, login, JWT)
   - Basic URL CRUD API
   - Docker Compose dev environment
+  - Firecrawl API integration (create/list/update/delete monitors)
 
-Week 2: Core Monitoring
-  - Polling worker (Celery task)
-  - HTTP fetching with configurable headers
-  - SHA-256 hash comparison
-  - Snapshot storage (PostgreSQL TEXT)
-  - Basic diff (line-level with difflib)
+Week 2: Firecrawl Webhooks
+  - Webhook endpoint for Firecrawl events
+  - Store check results in PostgreSQL
+  - Basic diff viewer (text + JSON)
+  - Firecrawl monitor management UI
 
-Week 3: Frontend
-  - React + TypeScript + Vite setup
-  - URL list page (CRUD)
-  - Snapshot viewer
-  - Diff viewer (diff2html)
-  - Basic auth flow
+Week 3: Self-Hosted Fallback
+  - Celery workers for polling
+  - Playwright/httpx fetching
+  - readability-lxml extraction
+  - difflib-based diffing
+  - Switch between Firecrawl and self-hosted per URL
 
 Week 4: Notifications
   - Email notifications (SMTP)
@@ -1260,29 +1269,29 @@ Week 4: Notifications
   - Notification rules per URL
   - Alert configuration UI
 
-Deliverable: Functional MVP with core features
+Deliverable: Functional MVP with Firecrawl as primary, self-hosted as fallback
 ```
 
 ### Phase 2: Polish & Scale (Weeks 5-8)
 
 ```
-Week 5: Content Quality
-  - HTML extraction (readability-lxml)
-  - Semantic diff engine
-  - Content normalization
-  - Diff quality improvements
+Week 5: Analytics
+  - Change frequency tracking
+  - Trend detection (price decreasing, etc.)
+  - Anomaly detection (spike in changes)
+  - Analytics dashboard
 
-Week 6: Storage & Performance
-  - S3/MinIO integration for raw HTML
-  - Snapshot pruning
-  - Redis caching layer
-  - Rate limiting
+Week 6: UI Polish
+  - Diff viewer improvements (unified, side-by-side, JSON, AI summary)
+  - Snapshot timeline
+  - Responsive design
+  - Dark mode
 
 Week 7: Advanced Features
-  - JS-rendered page support (Playwright integration)
-  - Tag-based filtering
-  - Export functionality
   - Bulk URL import (CSV)
+  - Export functionality
+  - Tag-based filtering
+  - Search across URLs
 
 Week 8: Monitoring & Observability
   - Prometheus metrics
@@ -1290,7 +1299,7 @@ Week 8: Monitoring & Observability
   - Structured logging
   - Error tracking (Sentry)
 
-Deliverable: Production-ready platform with quality diffs
+Deliverable: Production-ready platform with analytics
 ```
 
 ### Phase 3: SaaS Features (Weeks 9-12)
@@ -1328,7 +1337,6 @@ Deliverable: Full SaaS platform ready for launch
 - Mobile app (React Native)
 - Browser extension for one-click monitoring
 - Team collaboration features
-- Advanced analytics (change frequency, uptime)
 - Custom extraction rules (JSON config)
 - Plugin marketplace
 - White-label option for agencies
@@ -1336,26 +1344,26 @@ Deliverable: Full SaaS platform ready for launch
 
 ---
 
-## 18. TECHNOLOGY RECOMMENDATIONS SUMMARY
+## 17. TECHNOLOGY RECOMMENDATIONS SUMMARY
 
 | Component | Technology | Justification |
 |-----------|-----------|---------------|
-| **Backend Framework** | FastAPI (Python) | Async-native, auto OpenAPI docs, excellent HTML parsing ecosystem |
-| **Language** | Python 3.12+ | BeautifulSoup, readability-lxml, trafilatura — unmatched for HTML content extraction |
+| **Backend Framework** | FastAPI (Python) | Async-native, auto OpenAPI docs, excellent ecosystem |
+| **Language** | Python 3.12+ | FastAPI, SQLAlchemy, Firecrawl SDK, readability-lxml |
 | **ORM** | SQLAlchemy 2.0 | Async support, mature, excellent migration tooling (Alembic) |
-| **Task Queue** | Celery + Redis | Battle-tested, excellent for distributed polling, Redis broker is lightweight |
-| **Scheduler** | APScheduler | Built-in Celery beat, simple cron-like scheduling |
 | **Database** | PostgreSQL 16+ | JSONB for flexible config, excellent indexing, row-level security |
-| **Cache/Broker** | Redis 7 | Rate limiting, caching, Celery broker, session storage |
+| **Cache/Session** | Redis 7 | Rate limiting, caching, session storage |
 | **Object Storage** | S3/MinIO | Cheap storage for raw HTML snapshots, scalable |
 | **Frontend Framework** | React 18 + TypeScript | Component-based, strong ecosystem, type safety |
 | **Build Tool** | Vite | Fast HMR, excellent DX, modern |
 | **Styling** | TailwindCSS + shadcn/ui | Rapid UI development, accessible components |
-| **Diff Viewer** | diff2html | Best balance of features and simplicity, unified/side-by-side views |
+| **Diff Viewer** | diff2html | Best balance of features and simplicity |
 | **Code Diff** | monaco-editor | VS Code quality, optional for code-heavy pages |
 | **HTTP Client** | httpx (async) | Async, supports cookies, headers, sessions |
-| **HTML Parsing** | readability-lxml + trafilatura | Article extraction, text cleaning |
-| **Diff Engine** | difflib (std) + custom semantic | Line-level + paragraph-level diffs |
+| **Browser Automation** | Playwright | JS rendering for self-hosted fallback |
+| **Content Extraction** | readability-lxml + trafilatura | Article extraction, text cleaning |
+| **Diff Engine** | difflib (std) + custom semantic | Line-level + paragraph-level diffs (self-hosted) |
+| **Task Queue** | Celery + Redis | Self-hosted polling (fallback only) |
 | **Auth** | JWT + refresh tokens | Stateless, scalable, standard for APIs |
 | **Password Hashing** | bcrypt | Industry standard |
 | **Validation** | Pydantic v2 | Fast, type-safe request/response validation |
@@ -1364,10 +1372,12 @@ Deliverable: Full SaaS platform ready for launch
 | **Error Tracking** | Sentry | Exception tracking, performance monitoring |
 | **Container** | Docker + Docker Compose | Dev and prod consistency |
 | **CI/CD** | GitHub Actions | Automated testing, building, deployment |
+| **Primary Backend** | Firecrawl Monitoring API | Scraping + AI diffing + structured extraction |
+| **Fallback Backend** | Self-hosted polling | Celery + Playwright + readability-lxml + difflib |
 
 ---
 
-## 19. PROJECT STRUCTURE
+## 18. PROJECT STRUCTURE
 
 ```
 emily-web-delta/
@@ -1376,23 +1386,24 @@ emily-web-delta/
 |   |   +-- __init__.py
 |   |   +-- main.py                    # FastAPI app, middleware
 |   |   +-- config.py                  # Settings (Pydantic BaseSettings)
-|   |   +-- celery_app.py              # Celery configuration
+|   |   +-- celery_app.py              # Celery configuration (self-hosted only)
 |   |   +-- __pycache__/
 |   |   +-- api/                       # API routes
 |   |   |   +-- __init__.py
 |   |   |   +-- auth.py                # Auth endpoints
 |   |   |   +-- urls.py                # URL CRUD
-|   |   |   +-- snapshots.py           # Snapshot endpoints
+|   |   |   +-- checks.py              # Check results endpoints
 |   |   |   +-- diffs.py               # Diff endpoints
 |   |   |   +-- notifications.py       # Notification rules
 |   |   |   +-- admin.py               # Admin endpoints
-|   |   |   +-- webhooks.py            # Webhook endpoints
+|   |   |   +-- webhooks.py            # Firecrawl webhook endpoint
+|   |   |   +-- analytics.py           # Analytics endpoints
 |   |   +-- core/                      # Core business logic
 |   |   |   +-- security.py            # Auth, password hashing
 |   |   |   +-- rate_limit.py          # Rate limiting
-|   |   |   +-- scheduler.py           # URL polling scheduler
-|   |   |   +-- diff_engine.py         # Diff computation
-|   |   |   +-- html_parser.py         # HTML extraction
+|   |   |   +-- scheduler.py           # URL polling scheduler (self-hosted)
+|   |   |   +-- diff_engine.py         # Diff computation (self-hosted)
+|   |   |   +-- html_parser.py         # HTML extraction (self-hosted)
 |   |   |   +-- url_validator.py      # URL validation
 |   |   +-- models/                    # SQLAlchemy models
 |   |   |   +-- user.py
@@ -1403,27 +1414,31 @@ emily-web-delta/
 |   |   |   +-- notification.py
 |   |   |   +-- api_key.py
 |   |   |   +-- audit_log.py
+|   |   |   +-- firecrawl_monitor.py
+|   |   |   +-- check_result.py
 |   |   +-- schemas/                   # Pydantic models
 |   |   |   +-- user.py
 |   |   |   +-- url.py
 |   |   |   +-- snapshot.py
 |   |   |   +-- diff.py
 |   |   |   +-- notification.py
+|   |   |   +-- firecrawl.py
 |   |   +-- services/                  # Business logic services
 |   |   |   +-- url_service.py
 |   |   |   +-- snapshot_service.py
 |   |   |   +-- diff_service.py
 |   |   |   +-- notification_service.py
 |   |   |   +-- storage_service.py     # S3/MinIO operations
-|   |   +-- workers/                   # Celery tasks
+|   |   |   +-- firecrawl_service.py   # Firecrawl API integration
+|   |   |   +-- analytics_service.py   # Change analytics
+|   |   +-- workers/                   # Celery tasks (self-hosted only)
 |   |   |   +-- polling.py             # URL polling task
 |   |   |   +-- diff_processing.py     # Diff computation task
 |   |   |   +-- notifications.py       # Notification dispatch
 |   |   +-- plugins/                   # Plugin system
 |   |   |   +-- base.py                # Plugin base classes
-|   |   |   +-- html_parsers/          # HTML parser plugins
-|   |   |   +-- diff_engines/          # Diff engine plugins
 |   |   |   +-- notifications/         # Notification plugins
+|   |   |   +-- analytics/             # Analytics plugins
 |   |   +-- db/                        # Database utilities
 |   |       +-- session.py
 |   |       +-- alembic/               # Migrations
@@ -1441,14 +1456,16 @@ emily-web-delta/
 |   |   |   +-- layout/                # Header, sidebar, nav
 |   |   |   +-- urls/                  # URL list, form, editor
 |   |   |   +-- diffs/                 # Diff viewer components
-|   |   |   +-- snapshots/             # Snapshot timeline
+|   |   |   +-- checks/                # Check results list
 |   |   |   +-- notifications/         # Notification config
+|   |   |   +-- analytics/             # Analytics dashboard
 |   |   +-- pages/
 |   |   |   +-- dashboard.tsx
 |   |   |   +-- url-list.tsx
 |   |   |   +-- url-detail.tsx
-|   |   |   +-- snapshots.tsx
+|   |   |   +-- checks.tsx
 |   |   |   +-- diffs.tsx
+|   |   |   +-- analytics.tsx
 |   |   |   +-- settings.tsx
 |   |   |   +-- admin.tsx
 |   |   +-- hooks/                     # Custom React hooks
@@ -1472,56 +1489,66 @@ emily-web-delta/
 
 ---
 
-## 20. KEY DESIGN DECISIONS & RATIONALE
+## 19. KEY DESIGN DECISIONS & RATIONALE
 
-### 20.1 Why Python over Node.js/Go?
+### 19.1 Why Firecrawl as Primary Backend?
 
-The core differentiator of this product is **meaningful diffing** — showing users *what changed* in a way that matters. Python's HTML parsing ecosystem (BeautifulSoup, readability-lxml, trafilatura) is 2-3 years ahead of Node.js equivalents in terms of quality, maturity, and ease of use. The content extraction pipeline is the heart of the product, and Python wins decisively here.
+1. **AI-powered change judging** — The `goal` field + LLM judging is genuinely novel. You pass "Alert when price changes" and the LLM judges each change, returns `meaningful`, `confidence`, `reason`. This is what we planned to build with semantic diffing, but Firecrawl has it production-ready.
 
-### 20.2 Why not just store HTML and diff raw?
+2. **JSON-mode structured extraction** — Define a Pydantic/zod schema, get per-field diffs like `plans[0].price: {previous: "$19/mo", current: "$24/mo"}`. This is exactly the structured field extraction we planned but hadn't seen done this cleanly.
 
-Raw HTML diffs are noisy and unactionable. A product page might change:
-- 500 lines of HTML
-- But only 2 lines of actual content (price, stock)
+3. **Crawl monitors** — Auto-discovers all pages on a site and diffs them each check. Saves weeks of custom crawler development.
 
-The extraction + semantic diff pipeline is what makes this product useful. Without it, users would see "500 lines changed" and not know what actually matters.
+4. **Development speed** — Cuts ~40% of development effort (weeks 2-5 of Phase 1-2). We go from zero to functional product in 4 weeks instead of 8-10.
 
-### 20.3 Why monolith first?
+5. **Diff quality** — Unified text diff + JSON diff + AI summary is superior to self-built heuristic diffing.
 
-1. **Speed to market:** Deploy one service, not 5.
-2. **Debugging:** Same process, same logs, same stack traces.
-3. **Team size:** 1-3 developers can manage a monolith easily.
-4. **No distributed transactions:** URL CRUD + snapshot creation + diff computation can all happen in one DB transaction.
-5. **Easy decomposition:** Clear module boundaries mean services can be extracted when needed.
+### 19.2 Why Self-Hosted as Fallback?
 
-### 20.4 Why PostgreSQL over MongoDB?
+1. **Cost control** — For high-frequency monitoring (5 min intervals), Firecrawl credits can be expensive. Self-hosted has zero marginal cost.
 
-1. **Relational data:** URLs -> Snapshots -> Diffs -> Notifications is inherently relational.
-2. **JSONB:** PostgreSQL JSONB provides document flexibility when needed.
-3. **Transactions:** ACID guarantees for URL state changes.
-4. **Full-text search:** PostgreSQL has built-in full-text search for URL names/tags.
-5. **Mature tooling:** Alembic migrations, SQLAlchemy, excellent ORM support.
+2. **Air-gapped deployments** — Some users cannot make external API calls. Self-hosted is the only option.
+
+3. **Full control** — For users who want to customize extraction, diffing, or storage.
+
+4. **Vendor lock-in mitigation** — Users can switch between Firecrawl and self-hosted per URL.
+
+### 19.3 Why Not Firecrawl-Only?
+
+1. **Cost at scale** — 100 URLs at 5-min intervals = ~$14,400 credits/month. Self-hosted is $0 marginal cost.
+
+2. **No self-hosting option** — Firecrawl is cloud-only. Our product must support self-hosting.
+
+3. **Differentiation** — If we're just a Firecrawl wrapper, we have no moat. The self-hosted fallback gives us a unique selling point.
+
+### 19.4 Why Monolith?
+
+1. **Speed to market** — Deploy one service, not 5.
+2. **Debugging** — Same process, same logs, same stack traces.
+3. **Team size** — 1-3 developers can manage a monolith easily.
+4. **No distributed transactions** — URL CRUD + check storage + diff computation can all happen in one DB transaction.
+5. **Easy decomposition** — Clear module boundaries mean services can be extracted when needed.
 
 ---
 
-## 21. RISKS & MITIGATIONS
+## 20. RISKS & MITIGATIONS
 
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
-| Target sites block polling | High | High | Rotate user agents, respect robots.txt, implement backoff, use Playwright for JS pages |
+| Firecrawl price increases | High | Medium | Self-hosted fallback, negotiate enterprise pricing |
+| Firecrawl API changes | Medium | Low | Abstract API behind service layer, version API |
+| Vendor lock-in | High | Medium | Per-URL backend selection, export tools |
+| Credit cost overruns | Medium | High | Usage alerts, budget caps, self-hosted fallback |
 | Storage growth | Medium | High | Snapshot pruning, S3 lifecycle policies, compression |
-| IP bans from aggressive polling | High | Medium | Rate limiting, adaptive intervals, per-URL throttling |
-| Diff quality poor | High | Medium | Multiple extraction methods, semantic diffing, user feedback loop |
-| JS-heavy pages fail to render | Medium | Medium | Playwright integration, configurable per URL, fallback to raw HTML |
 | Security vulnerability in stored HTML | High | Medium | HTML sanitization, CSP headers, DOMPurify, no inline scripts |
 | Scale beyond monolith | Medium | Low | Clear module boundaries, extract polling worker first |
-| API rate limits from targets | Medium | High | Exponential backoff, retry logic, user-configurable delays |
+| Firecrawl outage | Medium | Low | Self-hosted fallback, retry logic, caching |
 
 ---
 
-## 22. COST ESTIMATES
+## 21. COST ESTIMATES
 
-### 22.1 Development Phase (Self-Hosted)
+### 21.1 Development Phase (Self-Hosted + Firecrawl)
 
 | Component | Cost |
 |-----------|------|
@@ -1530,9 +1557,10 @@ The extraction + semantic diff pipeline is what makes this product useful. Witho
 | Redis (on VPS) | Included |
 | MinIO (on VPS) | Included |
 | Domain + SSL | $10-15/year |
-| **Total** | **$20-40/month** |
+| Firecrawl credits (100 URLs, daily) | ~$288/month |
+| **Total** | **$300-350/month** |
 
-### 22.2 Production SaaS
+### 21.2 Production SaaS
 
 | Component | Cost |
 |-----------|------|
@@ -1544,9 +1572,10 @@ The extraction + semantic diff pipeline is what makes this product useful. Witho
 | SES (email delivery) | $0.10/1000 emails |
 | Cloudflare (DNS + WAF) | Free-$20/month |
 | Sentry (error tracking) | Free-$25/month |
-| **Total** | **$150-250/month** |
+| Firecrawl credits (varies by usage) | $0.01-0.05/scrape |
+| **Total** | **$150-250/month + Firecrawl credits** |
 
-### 22.3 Scale Production
+### 21.3 Scale Production
 
 | Component | Cost |
 |-----------|------|
@@ -1555,12 +1584,33 @@ The extraction + semantic diff pipeline is what makes this product useful. Witho
 | ElastiCache Redis | $50-100/month |
 | S3 + CloudFront | $50-100/month |
 | ECS/EKS compute | $300-500/month |
-| **Total** | **$700-1200/month** |
+| Firecrawl credits (varies by usage) | $0.01-0.05/scrape |
+| **Total** | **$700-1200/month + Firecrawl credits** |
+
+### 21.4 Cost Comparison: Firecrawl vs Self-Hosted
+
+| Scenario | Firecrawl Credits | Self-Hosted Infra | Total |
+|----------|------------------|-------------------|-------|
+| 100 URLs, daily | $288 | $20 | $308/month |
+| 100 URLs, hourly | $2,160 | $20 | $2,180/month |
+| 100 URLs, 5-min | $14,400 | $40 | $14,440/month |
+| 10 URLs, daily | $28.80 | $20 | $48.80/month |
+| 10 URLs, 5-min | $1,440 | $40 | $1,480/month |
+
+**Key insight:** For low-frequency monitoring (daily or hourly), Firecrawl credits are reasonable. For high-frequency (5-min intervals), self-hosted is significantly cheaper.
 
 ---
 
 ## END OF DOCUMENT
 
-This architecture document provides a comprehensive blueprint for building Emily Web Delta — a web page change monitoring platform. The recommended approach is a **Python/FastAPI modular monolith** with **Celery workers** for polling, **PostgreSQL** for storage, **React** for the frontend, and **diff2html** for diff display. The system is designed to scale from a single VPS ($20/month) to a Kubernetes cluster ($2000+/month) with clear decomposition paths.
+This architecture document presents a comprehensive blueprint for building Emily Web Delta — a web page change monitoring platform. The recommended approach is a **Python/FastAPI modular monolith** with **Firecrawl Monitoring API as the primary backend** for scraping, AI-powered diffing, and structured extraction, with a **self-hosted fallback** (Celery + Playwright + readability-lxml + difflib) for cost-sensitive or air-gapped deployments.
 
-The key differentiator is the **content extraction + semantic diff pipeline** — extracting meaningful text from HTML and computing paragraph-level diffs rather than line-level HTML diffs. This is where Python's ecosystem provides a decisive advantage.
+The key differentiator is the combination of:
+1. **Firecrawl's AI judging** for meaningful change detection
+2. **JSON-mode structured extraction** for per-field diffs
+3. **Multi-tenant team collaboration** (which Firecrawl lacks)
+4. **Self-hosting option** (which Firecrawl lacks)
+5. **Change analytics** (frequency, trends, anomaly detection)
+6. **Plugin system** for extensible notifications and analytics
+
+This positions Emily Web Delta as a **complete monitoring platform** — not just a wrapper around Firecrawl, but a full-featured SaaS that combines the best of both worlds: Firecrawl's AI-powered extraction and our own UI, multi-tenancy, and analytics.
