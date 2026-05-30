@@ -43,6 +43,21 @@ async def client():
         yield ac
 
 
+@pytest.fixture(autouse=True)
+def override_get_session():
+    """Override get_session to use SQLite instead of PostgreSQL."""
+    from app.db.session import get_session
+    from app.main import app
+
+    async def test_get_session():
+        async with async_session() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = test_get_session
+    yield
+    app.dependency_overrides.clear()
+
+
 @pytest.fixture
 async def db_session():
     """Test database session."""

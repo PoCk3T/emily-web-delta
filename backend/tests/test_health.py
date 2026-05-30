@@ -16,4 +16,5 @@ async def test_ready(client: AsyncClient):
     response = await client.get("/api/v1/ready")
     assert response.status_code == 200
     data = response.json()
-    assert data["ready"] is True
+    assert data["status"] == "healthy"
+    assert data["checks"]["database"] == "ok"
