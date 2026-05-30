@@ -3,6 +3,8 @@
 import uuid
 from datetime import datetime, timezone
 
+from typing import List
+
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -40,8 +42,8 @@ class Snapshot(Base):
     url: Mapped["Url"] = relationship(
         "Url", back_populates="snapshots", lazy="selectin"
     )
-    diffs: Mapped[list["Diff"]] = relationship(
-        "Diff", back_populates="snapshot", lazy="select"
+    diffs: Mapped[List["Diff"]] = relationship(
+        "Diff", lazy="select"
     )
 
     def __repr__(self) -> str:

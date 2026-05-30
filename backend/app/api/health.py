@@ -17,7 +17,7 @@ async def health_check():
 @router.get("/ready")
 async def readiness_check():
     """Readiness probe - checks dependencies."""
-    from app.db.session import async_engine
+    from app.db.session import engine as async_engine
 
     checks = {}
 
