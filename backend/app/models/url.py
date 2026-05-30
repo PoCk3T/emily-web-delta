@@ -71,6 +71,7 @@ class Url(Base):
     firecrawl_config: Mapped[dict | None] = mapped_column(
         JSON, nullable=True
     )
+    goal: Mapped[str | None] = mapped_column(Text, nullable=True)
     failure_consecutive_count: Mapped[int] = mapped_column(
         Integer, default=0
     )
@@ -102,6 +103,11 @@ class Url(Base):
 
     def __repr__(self) -> str:
         return f"<Url(id={self.id}, name={self.name}, url={self.url})>"
+
+    @property
+    def snapshot_count(self) -> int:
+        """Count of snapshots for this URL."""
+        return len(self.snapshots) if self.snapshots else 0
 
 
 # Forward references
