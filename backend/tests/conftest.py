@@ -65,11 +65,10 @@ async def db_session():
 
 
 @pytest.fixture(autouse=True)
-async def seed_default_tenant():
+async def seed_default_tenant(setup_db):
     """Create a default tenant for tests."""
     import uuid
     from app.models.tenant import Tenant
-    from app.models.user import User
 
     async with async_session() as session:
         # Create a default tenant
