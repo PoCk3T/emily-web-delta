@@ -1,28 +1,25 @@
-import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
   Globe,
   Activity,
-  GitDiff,
+  GitCompare,
   BarChart3,
   Bell,
   Settings,
   Shield,
-  Menu,
-  X,
   Moon,
   Sun,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
-import { useUiStore } from '../store/uiStore';
-import { ROUTES } from '../lib/constants';
+import { useUiStore } from '../../store/uiStore';
+import { ROUTES } from '../../lib/constants';
 
 interface NavItem {
   name: string;
   href: string;
-  icon: React.FC<{ className?: string }>;
+  icon: React.FC<{ className?: string; size?: number | string }>;
   adminOnly?: boolean;
 }
 
@@ -30,7 +27,7 @@ const navItems: NavItem[] = [
   { name: 'Dashboard', href: ROUTES.dashboard, icon: LayoutDashboard },
   { name: 'URLs', href: ROUTES.urls, icon: Globe },
   { name: 'Checks', href: ROUTES.checks, icon: Activity },
-  { name: 'Diffs', href: ROUTES.diffs, icon: GitDiff },
+  { name: 'Diffs', href: ROUTES.diffs, icon: GitCompare },
   { name: 'Analytics', href: ROUTES.analytics, icon: BarChart3 },
   { name: 'Notifications', href: ROUTES.settings, icon: Bell },
   { name: 'Settings', href: ROUTES.settings, icon: Settings },

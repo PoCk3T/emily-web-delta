@@ -17,6 +17,7 @@ from app.core.security import (
     verify_password,
 )
 from app.db.session import get_session
+from app.models.tenant import Tenant
 from app.models.user import User
 
 router = APIRouter()
@@ -73,6 +74,15 @@ async def register(request: RegisterRequest, db: AsyncSession = Depends(get_sess
         is_active=True,
     )
     db.add(user)
+    await db.flush()
+
+    # Create tenant for the user
+    tenant = Tenant(
+        name=request.name,
+        owner=user,
+        is_active=True,
+    )
+    db.add(tenant)
     await db.commit()
     await db.refresh(user)
 

@@ -1,10 +1,9 @@
-import React from 'react';
 import { usePlatformStats } from '../hooks/useAuth';
 import { UrlStatusCard } from '../components/urls/UrlStatusCard';
-import { getStatusColor, getStatusDot } from '../lib/utils';
+import { getStatusDot } from '../lib/utils';
 import { ROUTES } from '../lib/constants';
 import { Link } from 'react-router-dom';
-import { Globe, Activity, GitDiff, TrendingUp, AlertCircle, Eye, Clock, ArrowUpRight } from 'lucide-react';
+import { Globe, Activity, GitCompare, TrendingUp, AlertCircle, Eye, Clock, ArrowUpRight } from 'lucide-react';
 
 export default function DashboardPage() {
   const { data: stats, isLoading } = usePlatformStats();
@@ -45,7 +44,7 @@ export default function DashboardPage() {
     {
       label: 'Total Diffs',
       value: stats?.totalDiffs ?? 0,
-      icon: GitDiff,
+      icon: GitCompare,
       color: 'text-amber-600 dark:text-amber-400',
       bg: 'bg-amber-50 dark:bg-amber-900/20',
     },

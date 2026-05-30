@@ -51,8 +51,8 @@ api.interceptors.response.use(
 
     if (error.response) {
       apiError.statusCode = error.response.status;
-      apiError.message = error.response.data?.message || 'Request failed';
-      apiError.details = error.response.data?.details;
+      apiError.message = (error.response?.data as any)?.message || 'Request failed';
+      apiError.details = (error.response?.data as any)?.details;
     } else if (error.code === 'ECONNABORTED') {
       apiError.message = 'Request timed out';
     } else if (error.message === 'Network Error') {

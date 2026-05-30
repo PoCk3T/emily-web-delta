@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { UrlCard } from './UrlCard';
 import { UrlForm } from './UrlForm';
 import type { Url, CreateUrlRequest } from '../../types';

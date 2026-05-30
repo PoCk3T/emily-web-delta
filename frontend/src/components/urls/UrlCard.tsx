@@ -1,8 +1,8 @@
-import React from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ExternalLink, Globe, Clock, Tag, MoreVertical, Play, Trash2, Edit, Eye } from 'lucide-react';
-import type { Url, Status } from '../../types';
-import { formatDate, formatRelative, getStatusColor, getStatusDot } from '../../lib/utils';
+import type { Url } from '../../types';
+import { getStatusColor, getStatusDot, formatRelative } from '../../lib/utils';
 import { ROUTES } from '../../lib/constants';
 
 interface UrlCardProps {
@@ -18,8 +18,8 @@ const backendLabels: Record<string, string> = {
   selfhosted: 'Self-hosted',
 };
 
-export function UrlCard({ url, onToggle, onDelete, onCheck, onEdit }: UrlCardProps) {
-  const [menuOpen, setMenuOpen] = React.useState(false);
+export function UrlCard({ url, onDelete, onCheck, onEdit }: UrlCardProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
     <div className="group relative rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-all hover:border-gray-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-800 dark:hover:border-gray-600">

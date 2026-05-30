@@ -44,7 +44,11 @@ RUN groupadd -r emily && useradd -r -g emily -m emily
 
 # Copy Python dependencies and application from builder
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /app /app
+
+# Set working directory
+WORKDIR /app
 
 # Set ownership
 RUN chown -R emily:emily /app

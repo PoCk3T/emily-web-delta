@@ -1,4 +1,3 @@
-import React from 'react';
 import { useUrls, useCreateUrl, useUpdateUrl, useDeleteUrl, useToggleUrl, useTriggerCheck } from '../hooks/useAuth';
 import { UrlList } from '../components/urls/UrlList';
 import type { CreateUrlRequest } from '../types';

@@ -1,13 +1,13 @@
-import React from 'react';
 import { useChecks } from '../hooks/useAuth';
-import { formatDate, formatRelative, getStatusDot } from '../lib/utils';
-import { AlertCircle, Activity, Clock, Loader2, Search, Filter } from 'lucide-react';
+import { formatRelative, getStatusDot } from '../lib/utils';
+import { AlertCircle, Activity, Loader2, Search, Filter } from 'lucide-react';
+import { useState, useMemo } from 'react';
 
 export default function ChecksPage() {
   const { data: checksData, isLoading } = useChecks();
   const checks = checksData?.items ?? [];
-  const [search, setSearch] = React.useState('');
-  const [statusFilter, setStatusFilter] = React.useState<string>('');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('');
 
   const filtered = checks.filter((c) => {
     const matchesSearch = !search || c.urlId?.toLowerCase().includes(search.toLowerCase());
@@ -15,7 +15,7 @@ export default function ChecksPage() {
     return matchesSearch && matchesStatus;
   });
 
-  const statusCounts = React.useMemo(() => {
+  const statusCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     checks.forEach((c) => {
       counts[c.status] = (counts[c.status] || 0) + 1;

@@ -1,9 +1,9 @@
-import React from 'react';
 import { useNotifications, useCreateNotification, useUpdateNotification, useDeleteNotification } from '../hooks/useAuth';
 import { formatDate } from '../lib/utils';
-import { Bell, Plus, Trash2, Edit, Loader2, AlertCircle } from 'lucide-react';
+import { Bell, Plus, Trash2, Edit, Loader2 } from 'lucide-react';
 import { NOTIFICATION_CHANNELS, NOTIFICATION_FREQUENCIES } from '../lib/constants';
 import type { CreateNotificationRuleRequest } from '../types';
+import { useState } from 'react';
 
 export default function SettingsPage() {
   const { data: notifications, isLoading } = useNotifications();
@@ -11,9 +11,9 @@ export default function SettingsPage() {
   const updateMutation = useUpdateNotification();
   const deleteMutation = useDeleteNotification();
 
-  const [showForm, setShowForm] = React.useState(false);
-  const [editingId, setEditingId] = React.useState<string | null>(null);
-  const [formData, setFormData] = React.useState<Partial<CreateNotificationRuleRequest>>({
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formData, setFormData] = useState<Partial<CreateNotificationRuleRequest>>({
     channel: 'email',
     frequency: 'immediate',
     conditions: [],

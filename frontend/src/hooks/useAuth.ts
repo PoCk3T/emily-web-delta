@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { LoginCredentials, LoginResponse, User, ApiError } from '../types';
+import type { LoginCredentials, LoginResponse, ApiError } from '../types';
 import { authApi, urlsApi, checksApi, diffsApi, notificationsApi, analyticsApi, usersApi } from '../lib/api';
 import { useAuthStore } from '../store/authStore';
 

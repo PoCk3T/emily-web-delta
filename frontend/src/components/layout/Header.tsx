@@ -1,8 +1,7 @@
-import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Bell, Moon, Sun, Menu, User, LogOut, Settings, ChevronDown } from 'lucide-react';
-import { useUiStore } from '../store/uiStore';
-import { useAuthStore } from '../store/authStore';
+import { Bell, Moon, Sun, LogOut, Settings, ChevronDown } from 'lucide-react';
+import { useUiStore } from '../../store/uiStore';
+import { useAuthStore } from '../../store/authStore';
 
 export function Header() {
   const location = useLocation();

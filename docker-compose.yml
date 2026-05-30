@@ -14,8 +14,8 @@ services:
   # ─── Backend API ───
   api:
     build:
-      context: .
-      dockerfile: backend/Dockerfile
+      context: ./backend
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     environment:
@@ -39,8 +39,8 @@ services:
   # ─── Celery Worker (self-hosted fallback only) ───
   worker:
     build:
-      context: .
-      dockerfile: backend/Dockerfile
+      context: ./backend
+      dockerfile: Dockerfile
     environment:
       - DATABASE_URL=postgresql+asyncpg://emily:emily@db:5432/emily
       - REDIS_URL=redis://redis:6379/0
@@ -55,8 +55,8 @@ services:
   # ─── Celery Beat (scheduler) ───
   beat:
     build:
-      context: .
-      dockerfile: backend/Dockerfile
+      context: ./backend
+      dockerfile: Dockerfile
     environment:
       - DATABASE_URL=postgresql+asyncpg://emily:emily@db:5432/emily
       - REDIS_URL=redis://redis:6379/0
@@ -71,8 +71,8 @@ services:
   # ─── Frontend (Nginx serves static React build) ───
   frontend:
     build:
-      context: .
-      dockerfile: frontend/Dockerfile
+      context: ./frontend
+      dockerfile: Dockerfile
     ports:
       - "80:80"
     depends_on:

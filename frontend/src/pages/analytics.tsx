@@ -1,4 +1,3 @@
-import React from 'react';
 import { useAnalytics, useUrl } from '../hooks/useAuth';
 import { useParams } from 'react-router-dom';
 import { TrendingUp, TrendingDown, Minus, AlertTriangle, BarChart3, Activity } from 'lucide-react';

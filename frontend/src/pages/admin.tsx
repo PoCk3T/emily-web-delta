@@ -1,4 +1,3 @@
-import React from 'react';
 import { Shield, Users, Database, Server, Settings, Key, AlertCircle } from 'lucide-react';
 
 export default function AdminPage() {

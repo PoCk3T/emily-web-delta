@@ -1,30 +1,66 @@
-# Emily Web Delta — Docker Ignore
-# Shared .dockerignore for both backend and frontend builds
+# ─── Node.js (frontend) ───
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.egg-info/
-.venv/
+# ─── Python (backend) ───
+backend/__pycache__/
+backend/*.py[cod]
+backend/*$py.class
+backend/*.so
+backend/*.egg-info/
+backend/dist/
+backend/build/
+backend/.venv/
+backend/venv/
 
-# Git
+# ─── Git ───
 .git/
 .gitignore
 
-# Environment
+# ─── Environment / Secrets ───
 .env
+.env.*
+!.env.example
 
-# Documentation (not needed in images)
-*.md
-
-# Tests (not needed in production images)
-tests/
-
-# Build artifacts
-dist/
-build/
-
-# IDE
+# ─── IDE / Editor ───
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# ─── Documentation (not needed in images) ───
+*.md
+ARCHITECTURE.md
+
+# ─── Tests (not needed in production images) ───
+backend/tests/
+
+# ─── Infrastructure / Terraform ───
+infra/
+
+# ─── Docker compose (not needed inside images) ───
+docker-compose.yml
+
+# ─── Logs ───
+*.log
+logs/
+
+# ─── Coverage ───
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ─── Temporary / scratch ───
+tmp/
+temp/
+*.tmp
+*.bak

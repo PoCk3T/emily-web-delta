@@ -1,14 +1,14 @@
-import React from 'react';
 import { useDiffs, useDiffAiSummary } from '../hooks/useAuth';
-import { formatDate, formatRelative } from '../lib/utils';
-import { GitDiff, Loader2, Sparkles, AlertCircle } from 'lucide-react';
+import { formatRelative } from '../lib/utils';
+import { GitCompare, Loader2, Sparkles } from 'lucide-react';
+import { useState } from 'react';
 
 export default function DiffsPage() {
   const { data: diffsData, isLoading } = useDiffs();
   const diffs = diffsData?.items ?? [];
 
-  const [selectedDiffId, setSelectedDiffId] = React.useState<string | null>(null);
-  const [viewMode, setViewMode] = React.useState<'unified' | 'side-by-side' | 'json'>('unified');
+  const [selectedDiffId, setSelectedDiffId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'unified' | 'side-by-side' | 'json'>('unified');
 
   const selectedDiff = diffs.find((d) => d.id === selectedDiffId) ?? null;
   const { data: aiSummaryData } = useDiffAiSummary(selectedDiffId ?? '');
@@ -44,7 +44,7 @@ export default function DiffsPage() {
       {/* Diff List */}
       {diffs.length === 0 ? (
         <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-12 text-center dark:border-gray-600 dark:bg-gray-800/50">
-          <GitDiff size={40} className="mx-auto mb-4 text-gray-400" />
+          <GitCompare size={40} className="mx-auto mb-4 text-gray-400" />
           <h3 className="mb-1 text-lg font-medium text-gray-900 dark:text-white">No diffs yet</h3>
           <p className="text-sm text-gray-500 dark:text-gray-400">
             Diffs will appear here when URL content changes
@@ -139,7 +139,7 @@ export default function DiffsPage() {
             ) : (
               <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 p-12 dark:border-gray-600 dark:bg-gray-800/50">
                 <div className="text-center">
-                  <GitDiff size={40} className="mx-auto mb-4 text-gray-400" />
+                  <GitCompare size={40} className="mx-auto mb-4 text-gray-400" />
                   <h3 className="text-lg font-medium text-gray-900 dark:text-white">Select a diff</h3>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Choose a diff from the list to view details</p>
                 </div>

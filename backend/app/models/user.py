@@ -3,6 +3,8 @@
 import uuid
 from datetime import datetime, timezone
 
+from typing import List
+
 from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -17,6 +19,13 @@ class User(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     email: Mapped[str] = mapped_column(
         String(255), unique=True, nullable=False, index=True
@@ -37,10 +46,10 @@ class User(Base):
     tenant: Mapped["Tenant"] = relationship(
         "Tenant", back_populates="owner", uselist=False, lazy="selectin"
     )
-    api_keys: Mapped[list["ApiKey"]] = relationship(
+    api_keys: Mapped[List["ApiKey"]] = relationship(
         "ApiKey", back_populates="user", lazy="select"
     )
-    audit_logs: Mapped[list["AuditLog"]] = relationship(
+    audit_logs: Mapped[List["AuditLog"]] = relationship(
         "AuditLog", back_populates="user", lazy="select"
     )
 

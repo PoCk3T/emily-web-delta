@@ -1,9 +1,8 @@
-import React from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useUrl, useChecks, useDiffs, useTriggerCheck } from '../hooks/useAuth';
-import { formatDate, formatRelative, getStatusColor, getStatusDot } from '../lib/utils';
+import { getStatusColor, getStatusDot, formatRelative } from '../lib/utils';
 import { ROUTES } from '../lib/constants';
-import { ArrowLeft, RefreshCw, Globe, Clock, Tag, ExternalLink, GitDiff, Activity, AlertCircle } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Globe, Clock, Tag, ExternalLink, GitCompare, Activity, AlertCircle } from 'lucide-react';
 
 export default function UrlDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -144,7 +143,7 @@ export default function UrlDetailPage() {
       <div className="rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 dark:border-gray-700">
           <div className="flex items-center gap-2">
-            <GitDiff size={18} className="text-gray-400" />
+            <GitCompare size={18} className="text-gray-400" />
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Diffs</h2>
           </div>
           <Link to={`${ROUTES.diffs}?urlId=${url.id}`} className="text-sm text-brand-600 hover:text-brand-700 dark:text-brand-400">
