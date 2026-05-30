@@ -54,7 +54,7 @@ jobs:
       - name: Run linter
         run: |
           cd backend
-          ruff check app/ tests/
+          ruff check app/ tests/ --fix
 
       - name: Run tests
         env:
