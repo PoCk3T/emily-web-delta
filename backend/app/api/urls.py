@@ -169,7 +169,7 @@ async def list_urls(
 async def get_url(url_id: str, db: AsyncSession = Depends(get_session)):
     """Get URL details."""
     from uuid import UUID
-    result = await db.execute(select(Url).where(Url.id == UUID(url_id)))
+    result = await db.execute(select(Url).options(selectinload(Url.snapshots)).where(Url.id == UUID(url_id)))
     url = result.scalar_one_or_none()
     if not url:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="URL not found")
@@ -194,7 +194,7 @@ async def get_url(url_id: str, db: AsyncSession = Depends(get_session)):
 async def update_url(url_id: str, request: UrlUpdateRequest, db: AsyncSession = Depends(get_session)):
     """Update URL configuration."""
     from uuid import UUID
-    result = await db.execute(select(Url).where(Url.id == UUID(url_id)))
+    result = await db.execute(select(Url).options(selectinload(Url.snapshots)).where(Url.id == UUID(url_id)))
     url = result.scalar_one_or_none()
     if not url:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="URL not found")
