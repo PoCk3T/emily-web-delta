@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.url_validator import validate_url
@@ -118,7 +119,7 @@ async def list_urls(
     db: AsyncSession = Depends(get_session),
 ):
     """List all URLs with pagination and filtering."""
-    query = select(Url)
+    query = select(Url).options(selectinload(Url.snapshots))
 
     if backend:
         query = query.where(Url.backend == backend)
