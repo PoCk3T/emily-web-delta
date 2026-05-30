@@ -1,6 +1,7 @@
 """Test configuration and fixtures."""
 
 import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -25,7 +26,22 @@ async_session = async_sessionmaker(
 )
 
 
-@pytest.fixture(autouse=True)
+def _override_get_session():
+    """Override get_session to use SQLite instead of PostgreSQL."""
+    from app.db.session import get_session
+
+    async def test_get_session():
+        async with async_session() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = test_get_session
+
+
+# Apply override at module level so it's set before any test runs
+_override_get_session()
+
+
+@pytest_asyncio.fixture(autouse=True)
 async def setup_db():
     """Create tables before each test."""
     async with engine.begin() as conn:
@@ -35,7 +51,7 @@ async def setup_db():
         await conn.run_sync(Base.metadata.drop_all)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client():
     """Test HTTP client."""
     transport = ASGITransport(app=app)
@@ -43,21 +59,7 @@ async def client():
         yield ac
 
 
-@pytest.fixture(autouse=True)
-def override_get_session():
-    """Override get_session to use SQLite instead of PostgreSQL."""
-    from app.db.session import get_session
-
-    async def test_get_session():
-        async with async_session() as session:
-            yield session
-
-    app.dependency_overrides[get_session] = test_get_session
-    yield
-    app.dependency_overrides.clear()
-
-
-@pytest.fixture
+@pytest_asyncio.fixture
 async def db_session():
     """Test database session."""
     async with async_session() as session:
