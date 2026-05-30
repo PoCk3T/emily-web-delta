@@ -36,7 +36,7 @@ class Tenant(Base):
 
     # Relationships
     owner: Mapped["User"] = relationship(
-        "User", lazy="selectin",
+        "User", back_populates="tenant", lazy="selectin",
     )
     urls: Mapped[List["Url"]] = relationship(
         "Url", back_populates="tenant", lazy="select"
@@ -61,3 +61,9 @@ from app.models.url import Url  # noqa: E402
 from app.models.notification import NotificationRule  # noqa: E402
 from app.models.firecrawl_monitor import FirecrawlMonitor  # noqa: E402
 from app.models.api_key import ApiKey  # noqa: E402
+
+# Configure remote_side after all models are loaded (avoids circular import).
+import importlib  # noqa: E402
+
+_User = importlib.import_module("app.models.user").User  # noqa: E402
+Tenant.owner.property.remote_side = {_User.__table__.c.tenant_id}  # noqa: E402
