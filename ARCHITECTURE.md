@@ -23,13 +23,16 @@
 12. Monitoring, Alerting & Notifications
 13. Performance & Scalability
 14. Extensibility & Plugin System
-15. Deployment & DevOps
-16. Implementation Roadmap
-17. Technology Recommendations Summary
-18. Project Structure
-19. Key Design Decisions & Rationale
-20. Risks & Mitigations
-21. Cost Estimates
+15. Containerization Strategy
+16. Deployment & DevOps
+17. CI/CD Pipeline
+18. Infrastructure as Code
+19. Implementation Roadmap
+20. Technology Recommendations Summary
+21. Project Structure
+22. Key Design Decisions & Rationale
+23. Risks & Mitigations
+24. Cost Estimates
 
 ---
 
@@ -1769,54 +1772,184 @@ class FirecrawlMonitorPlugin:
 
 ---
 
-## 15. DEPLOYMENT & DEVOPS
+## 15. CONTAINERIZATION STRATEGY
 
-### 15.1 Development Environment (Docker Compose)
+All services are containerized for dev/prod parity. The project uses **multi-stage Docker builds** to keep production images small and secure.
+
+### 15.1 Backend Dockerfile (Multi-Stage)
+
+```dockerfile
+# backend/Dockerfile
+# Stage 1: Build dependencies
+FROM python:3.12-slim AS base
+
+# System deps: libxml2, libxslt (readability-lxml), CloakBrowser Chromium
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libxml2 libxslt1.1 libssl3 ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Stage 2: Dependency install
+FROM base AS deps
+WORKDIR /app
+COPY backend/pyproject.toml backend/requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Stage 3: Production
+FROM base AS production
+WORKDIR /app
+
+# Non-root user for security
+RUN useradd --create-home --shell /bin/bash emily
+USER emily
+
+# Copy deps and code
+COPY --from=deps /app/requirements.txt ./requirements.txt
+COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=deps /usr/local/bin/uvicorn /usr/local/bin/uvicorn
+
+COPY --chown=emily backend/app ./app
+COPY --chown=emily backend/alembic.ini ./alembic.ini
+COPY --chown=emily backend/alembic ./alembic
+
+# CloakBrowser binary (copied from host or downloaded at build time)
+# Option A: Pre-bake into image
+COPY --chown=emily backend/.cloakbrowser /home/emily/.cloakbrowser
+
+EXPOSE 8000
+
+# Cloud Run contract: listen on 0.0.0.0:$PORT
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+**Key design decisions:**
+- Multi-stage build: final image ~150MB (vs 1GB+ single-stage)
+- Non-root user: container runs as `emily` user, not root
+- `--no-cache-dir`: pip cache not needed in production
+- Only runtime deps installed (no dev/build deps)
+- CloakBrowser binary pre-baked (no runtime download)
+
+### 15.2 Frontend Dockerfile (Multi-Stage)
+
+```dockerfile
+# frontend/Dockerfile
+# Stage 1: Build
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ .
+RUN npm run build
+
+# Stage 2: Serve with Nginx
+FROM nginx:alpine AS production
+COPY --from=builder /app/dist /usr/share/nginx/html
+COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
+```
+
+**Key design decisions:**
+- Static build served by Nginx (no Node.js runtime needed)
+- Nginx handles gzip, caching headers, SPA fallback routing
+- Image ~25MB
+
+### 15.3 .dockerignore
+
+```dockerignore
+# .dockerignore (shared)
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.gitignore
+.env
+*.md
+tests/
+.venv/
+*.egg-info/
+dist/
+build/
+.vscode/
+.idea/
+```
+
+### 15.4 Docker Compose (Updated for GCP readiness)
 
 ```yaml
 # docker-compose.yml
-version: '3.9'
-
 services:
-  # Backend API
+  # Backend API (listens on 0.0.0.0:8000 — required for Cloud Run)
   api:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://emily:emily@db:5432/emily
+      - DATABASE_URL=postgresql+asyncpg://emily:emily@db:5432/emily
       - REDIS_URL=redis://redis:6379/0
       - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
       - SECRET_KEY=dev-secret-key-change-in-prod
+      - CLOAKBROWSER_PATH=/home/emily/.cloakbrowser/chromium-146.0.7680.177.4/chrome
     depends_on:
-      - db
-      - redis
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
 
   # Celery Worker (self-hosted fallback only)
   worker:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     environment:
-      - DATABASE_URL=postgresql://emily:emily@db:5432/emily
+      - DATABASE_URL=postgresql+asyncpg://emily:emily@db:5432/emily
       - REDIS_URL=redis://redis:6379/0
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
     command: celery -A app.celery_app worker --concurrency=4 --loglevel=info
+    restart: unless-stopped
 
-  # Frontend
-  frontend:
-    build: ./frontend
-    ports:
-      - "3000:3000"
+  # Celery Beat (scheduler)
+  beat:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     environment:
-      - VITE_API_URL=http://localhost:8000/api/v1
+      - DATABASE_URL=postgresql+asyncpg://emily:emily@db:5432/emily
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    command: celery -A app.celery_app beat --loglevel=info
+    restart: unless-stopped
+
+  # Frontend (Nginx serves static React build)
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "80:80"
     depends_on:
       - api
+    environment:
+      - VITE_API_URL=http://localhost:8000/api/v1
 
-  # Database
+  # Database (PostgreSQL 16)
   db:
-    image: postgres:16
+    image: postgres:16-alpine
     environment:
       - POSTGRES_DB=emily
       - POSTGRES_USER=emily
@@ -1825,14 +1958,21 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U emily -d emily"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
 
-  # Cache / Broker
+  # Cache / Celery Broker
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    restart: unless-stopped
 
-  # Object Storage (local S3 alternative)
+  # Object Storage (local S3 alternative for dev)
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
@@ -1842,32 +1982,858 @@ services:
     ports:
       - "9000:9000"
       - "9001:9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  minio_data:
 ```
 
-### 15.2 Production Deployment Options
-
-**Option A: Managed Cloud (Recommended for SaaS)**
-- Cloudflare (DNS + WAF + CDN)
-- AWS Application Load Balancer
-- ECS Fargate (or EKS)
-- RDS PostgreSQL (Multi-AZ), ElastiCache Redis, S3, SES
-- Estimated: $200-500/month + Firecrawl credits
-
-**Option B: VPS (Budget)**
-- DigitalOcean / Linode / Hetzner (4GB+ RAM)
-- Docker Compose: FastAPI + Nginx, Celery, PostgreSQL, Redis, MinIO
-- Estimated: $20-40/month + Firecrawl credits
-
-**Option C: Kubernetes (Scale)**
-- EKS / GKE / AKS
-- Ingress Controller, Deployments for api-server, celery-worker, celery-beat, frontend
-- RDS PostgreSQL + ElastiCache + S3
-- Prometheus + Grafana (monitoring)
-- Estimated: $500-2000/month + Firecrawl credits
+**Key changes from original:**
+- `postgresql+asyncpg://` DSN (async driver for SQLAlchemy async)
+- `service_healthy` depends_on condition (waits for DB to be ready)
+- Health check on API service
+- Celery Beat service added (scheduler for polling)
+- CloakBrowser path configured via env var
 
 ---
 
-## 16. IMPLEMENTATION ROADMAP
+## 16. DEPLOYMENT & DEVOPS
+
+### 16.1 Google Cloud Platform — Primary Production Target
+
+Google Cloud is the recommended production target. It aligns with the existing AlloyDB trial, offers native integration with Cloud Run, and provides a clear migration path from VPS to managed services.
+
+#### 16.1.1 Architecture on GCP
+
+```
+                    +---------------------+
+                    |   Cloudflare (DNS)  |
+                    |   WAF + CDN         |
+                    +----------+----------+
+                               |
+                    +----------v----------+
+                    |  Cloud Run Service  |
+                    |  (api + frontend)   |
+                    |  Auto-scale 0-N     |
+                    +----------+----------+
+                               |
+          +--------------------+--------------------+
+          |                     |                   |
+          v                     v                   v
+    +-----------+       +-------------+    +---------------+
+    |  Cloud    |       |  Cloud      |    |  Cloud Storage|
+    |  SQL for  |       |  Memorystore|    |  (snapshot    |
+    |  PostgreSQL|       |  Redis      |    |   raw HTML)   |
+    +-----------+       +-------------+    +---------------+
+          |
+    +-----v------+
+    |  Cloud Run  |
+    |  Job (DB    |
+    |  migrations) |
+    +-------------+
+```
+
+#### 16.1.2 Service Breakdown
+
+| Service | GCP Offering | Purpose |
+|---------|-------------|---------|
+| API Server | Cloud Run (v2) | FastAPI backend, HTTP requests, auto-scales 0-N |
+| Frontend | Cloud Run (v2) | Nginx serving static React build |
+| Database | Cloud SQL for PostgreSQL 16 | Primary data store, Multi-AZ, automated backups |
+| Cache / Broker | Cloud Memorystore (Redis 7) | Session storage, rate limiting, Celery broker |
+| Object Storage | Cloud Storage (S3-compatible) | Raw HTML snapshots, diff artifacts |
+| DB Migrations | Cloud Run Job | Alembic migrations, run once on deploy |
+| Email | Cloud SES / SendGrid | Transactional emails |
+| Monitoring | Cloud Monitoring + Cloud Logging | Metrics, logs, alerting |
+| DNS / WAF / CDN | Cloudflare | DNS, WAF, edge caching, SSL |
+
+#### 16.1.3 Cloud Run Configuration
+
+```bash
+# API Service
+gcloud run deploy emily-api \
+  --image us-docker.pkg.dev/$PROJECT_ID/emily-repo/emily-api:latest \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --platform managed \
+  --memory 512Mi \
+  --cpu 1 \
+  --min-instances 1 \
+  --max-instances 10 \
+  --concurrency 80 \
+  --timeout 300s \
+  --set-env-vars DATABASE_URL=postgresql://emily:emily@/emily \
+  --set-secrets FIRECRAWL_API_KEY=firecrawl-api-key:latest \
+  --set-secrets SECRET_KEY=secret-key:latest \
+  --vpc-connector emily-vpc-connector \
+  --quiet
+
+# Frontend Service (serves static build)
+gcloud run deploy emily-frontend \
+  --image us-docker.pkg.dev/$PROJECT_ID/emily-repo/emily-frontend:latest \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --platform managed \
+  --memory 128Mi \
+  --cpu 0.5 \
+  --min-instances 1 \
+  --quiet
+
+# DB Migration Job (runs on deploy)
+gcloud run jobs create emily-migrate \
+  --image us-docker.pkg.dev/$PROJECT_ID/emily-repo/emily-api:latest \
+  --region us-central1 \
+  --command "alembic" \
+  --args "upgrade", "head" \
+  --set-env-vars DATABASE_URL=postgresql://emily:emily@/emily \
+  --set-secrets FIRECRAWL_API_KEY=firecrawl-api-key:latest \
+  --set-secrets SECRET_KEY=secret-key:latest \
+  --vpc-connector emily-vpc-connector \
+  --quiet
+```
+
+**Key Cloud Run settings:**
+- `--min-instances 1`: API stays warm (important for webhook delivery)
+- `--memory 512Mi`: Enough for FastAPI + SQLAlchemy pool
+- `--concurrency 80`: Max concurrent requests per instance
+- `--timeout 300s`: 5 min for long-running polling tasks
+- `--set-secrets`: Cloud Secret Manager for API keys
+- `--vpc-connector`: Direct VPC egress to Cloud SQL / Memorystore
+
+#### 16.1.4 Cloud SQL for PostgreSQL
+
+```bash
+# Create instance (Multi-AZ for HA)
+gcloud sql instances create emily-db \
+  --database-version=POSTGRES_16 \
+  --cpu=2 \
+  --memory=7680MiB \
+  --region=us-central1 \
+  --edition=ENTERPRISE \
+  --availability-type=HIGH_AVAILABILITY \
+  --quiet
+
+# Enable backups
+gcloud sql instances patch emily-db \
+  --backup-start-time=03:00 \
+  --retained-backup-count=7 \
+  --quiet
+
+# Create database
+gcloud sql databases create emily --instance=emily-db --quiet
+
+# Set password for default user
+gcloud sql users set-password postgres \
+  --instance=emily-db \
+  --password=$(gcloud secrets versions access latest --secret=emily-db-password) \
+  --quiet
+```
+
+#### 16.1.5 Cloud Memorystore (Redis)
+
+```bash
+gcloud redis instances create emily-redis \
+  --size=1 \
+  --region=us-central1 \
+  --redis-version=REDIS_7_0 \
+  --tier=basic \
+  --connect-mode=PRIVATE_SERVICE_ACCESS \
+  --quiet
+```
+
+#### 16.1.6 Cloud Storage (S3-compatible)
+
+```bash
+gsutil mb -l us -p $PROJECT_ID gs://emily-snapshots/
+gsutil versioning set on gs://emily-snapshots/
+
+# Lifecycle policy: move old snapshots to cold storage
+gsutil lifecycle set <<EOF
+{
+  "rule": [
+    {
+      "id": "archive-old-snapshots",
+      "action": {"type": "SetStorageClass", "storageClass": "COLDLINE"},
+      "condition": {"age": 90}
+    },
+    {
+      "id": "delete-very-old",
+      "action": {"type": "Delete"},
+      "condition": {"age": 365}
+    }
+  ]
+}
+EOF
+```
+
+### 16.2 GKE Alternative (for scale)
+
+If the app outgrows Cloud Run (e.g., needs GPU for self-hosted LLM judging, persistent CloakBrowser instances, or complex sidecar patterns), migrate to GKE Autopilot.
+
+```bash
+# Create GKE Autopilot cluster (golden path defaults)
+gcloud container clusters create-auto emily-gke \
+  --region=us-central1 \
+  --quiet
+
+# Deploy with kubectl (manifests in infra/k8s/)
+kubectl apply -f infra/k8s/namespace.yaml
+kubectl apply -f infra/k8s/api-deployment.yaml
+kubectl apply -f infra/k8s/frontend-deployment.yaml
+kubectl apply -f infra/k8s/worker-deployment.yaml
+```
+
+**Cloud Run vs GKE decision matrix:**
+
+| Criterion | Cloud Run | GKE Autopilot |
+|-----------|-----------|---------------|
+| Complexity | Low (no cluster management) | Medium (Kubernetes knowledge) |
+| Scaling | Automatic, per-request | Automatic, per-pod |
+| Cost at low scale | Pay-per-request (cheaper) | Fixed base cost |
+| Cost at high scale | Higher (per-request billing) | Lower (resource-based) |
+| Sidecars | Supported | Full support |
+| GPU support | Supported (limited) | Full support |
+| Custom networking | Direct VPC egress | Full VPC control |
+| Best for | API, web apps, batch jobs | Complex microservices, GPU workloads |
+
+**Recommendation:** Start with Cloud Run. Migrate to GKE only when Cloud Run limitations become a blocker.
+
+### 16.3 VPS / Self-Hosted (Budget Option)
+
+For $20-40/month on Hetzner/DigitalOcean:
+
+```bash
+# Single VPS (4GB RAM, 2 vCPU)
+# docker-compose up -d
+
+# Nginx reverse proxy (SSL via certbot)
+sudo certbot --nginx -d emily.app -d api.emily.app
+
+# Systemd service for docker-compose auto-restart
+sudo systemctl enable docker-compose@default
+```
+
+### 16.4 Health Check Endpoints
+
+```python
+# app/api/health.py
+@app.get("/api/v1/health")
+async def health_check():
+    """Kubernetes / Cloud Run health probe endpoint."""
+    checks = {}
+    
+    # Database connectivity
+    try:
+        await db.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception as e:
+        checks["database"] = f"error: {e}"
+    
+    # Redis connectivity
+    try:
+        await redis.ping()
+        checks["redis"] = "ok"
+    except Exception as e:
+        checks["redis"] = f"error: {e}"
+    
+    # Overall status
+    status = "healthy" if all(c == "ok" for c in checks.values()) else "degraded"
+    
+    return {"status": status, "checks": checks}
+
+@app.get("/api/v1/ready")
+async def readiness_check():
+    """Readiness probe — fails if dependencies are down."""
+    checks = {}
+    
+    try:
+        await db.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception:
+        checks["database"] = "error"
+    
+    try:
+        await redis.ping()
+        checks["redis"] = "ok"
+    except Exception:
+        checks["redis"] = "error"
+    
+    if all(c == "ok" for c in checks.values()):
+        return {"ready": True, "checks": checks}
+    else:
+        raise HTTPException(status_code=503, detail="Not ready")
+```
+
+**Cloud Run uses `/` for liveness and `/` with `--probe-liveness-path` / `--probe-readiness-path` for custom paths. Configure:**
+
+```bash
+gcloud run deploy emily-api \
+  --probe-liveness-path=/api/v1/health \
+  --probe-readiness-path=/api/v1/ready \
+  --probe-initial-delay=10s \
+  --probe-period=10s \
+  --quiet
+```
+
+---
+
+## 17. CI/CD PIPELINE
+
+### 17.1 GitHub Actions (Primary CI/CD)
+
+```yaml
+# .github/workflows/ci-cd.yml
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: us-docker.pkg.dev
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REPO: emily-repo
+
+jobs:
+  # ─── Test ───
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: emily_test
+          POSTGRES_USER: emily
+          POSTGRES_PASSWORD: emily
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov
+      - name: Run linter
+        run: |
+          cd backend
+          ruff check app/ tests/
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql+asyncpg://emily:emily@localhost:5432/emily_test
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          cd backend
+          pytest tests/ -v --cov=app --cov-report=xml
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+
+  # ─── Build & Push Images ───
+  build:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure gcloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+      
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker $REGISTRY --quiet
+      
+      - name: Build & push backend image
+        run: |
+          IMAGE_TAG="${REGISTRY}/${PROJECT_ID}/${REPO}/emily-api:${{ github.sha }}"
+          docker build -t "$IMAGE_TAG" -f backend/Dockerfile .
+          docker push "$IMAGE_TAG"
+      
+      - name: Build & push frontend image
+        run: |
+          IMAGE_TAG="${REGISTRY}/${PROJECT_ID}/${REPO}/emily-frontend:${{ github.sha }}"
+          docker build -t "$IMAGE_TAG" -f frontend/Dockerfile .
+          docker push "$IMAGE_TAG"
+
+  # ─── Deploy to Cloud Run ───
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Configure gcloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Deploy API
+        run: |
+          gcloud run deploy emily-api \
+            --image "${REGISTRY}/${PROJECT_ID}/${REPO}/emily-api:${{ github.sha }}" \
+            --region us-central1 \
+            --allow-unauthenticated \
+            --platform managed \
+            --memory 512Mi \
+            --cpu 1 \
+            --min-instances 1 \
+            --set-secrets FIRECRAWL_API_KEY=firecrawl-api-key:latest \
+            --set-secrets SECRET_KEY=secret-key:latest \
+            --quiet
+      
+      - name: Deploy Frontend
+        run: |
+          gcloud run deploy emily-frontend \
+            --image "${REGISTRY}/${PROJECT_ID}/${REPO}/emily-frontend:${{ github.sha }}" \
+            --region us-central1 \
+            --allow-unauthenticated \
+            --platform managed \
+            --quiet
+      
+      - name: Run DB migrations
+        run: |
+          gcloud run jobs execute emily-migrate \
+            --region us-central1 \
+            --image "${REGISTRY}/${PROJECT_ID}/${REPO}/emily-api:${{ github.sha }}" \
+            --quiet
+```
+
+### 17.2 Cloud Build Alternative (Faster builds)
+
+For faster builds, use Cloud Build with Cloud Run source deployment:
+
+```yaml
+# cloudbuild.yaml
+steps:
+  # Run tests
+  - name: 'python:3.12-slim'
+    entrypoint: 'pip'
+    args: ['install', '-r', 'backend/requirements.txt']
+    
+  - name: 'python:3.12-slim'
+    entrypoint: 'pytest'
+    args: ['-v', 'tests/']
+    dir: 'backend'
+
+  # Build and deploy backend
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud run deploy emily-api \
+          --source . \
+          --directory backend \
+          --region us-central1 \
+          --allow-unauthenticated \
+          --memory 512Mi \
+          --min-instances 1 \
+          --set-env-vars DATABASE_URL=postgresql://emily:emily@/emily \
+          --set-secrets FIRECRAWL_API_KEY=firecrawl-api-key:latest \
+          --quiet
+
+  # Build and deploy frontend
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud run deploy emily-frontend \
+          --source . \
+          --directory frontend \
+          --region us-central1 \
+          --allow-unauthenticated \
+          --quiet
+```
+
+### 17.3 Deployment Strategy
+
+```
+PR Open          PR Merged to main
+    |                    |
+    v                    v
+[CI: test + lint]  [CI: test + lint]
+    |                    v
+    |             [Build Docker images]
+    |                    |
+    |              [Push to Artifact Registry]
+    |                    |
+    |             [Deploy to Cloud Run]
+    |                    |
+    |             [Run DB migrations]
+    |                    |
+    |             [Verify health check]
+    |                    |
+    |             [Notify Slack/Telegram]
+```
+
+---
+
+## 18. INFRASTRUCTURE AS CODE
+
+### 18.1 Terraform — GCP Infrastructure
+
+```terraform
+# infra/gcp/main.tf
+terraform {
+  required_version = ">= 1.5"
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 5.0"
+    }
+  }
+  backend "gcs" {
+    bucket = "emily-terraform-state"
+    prefix = "gcp"
+  }
+}
+
+provider "google" {
+  project = var.project_id
+  region  = var.region
+}
+
+# ─── Enable APIs ───
+resource "google_project_service" "apis" {
+  for_each = toset([
+    "run.googleapis.com",
+    "sqladmin.googleapis.com",
+    "redis.googleapis.com",
+    "storage.googleapis.com",
+    "secretmanager.googleapis.com",
+    "logging.googleapis.com",
+    "monitoring.googleapis.com",
+    "cloudbuild.googleapis.com",
+  ])
+  service = each.value
+  disable_on_destroy = false
+}
+
+# ─── Cloud SQL for PostgreSQL ───
+resource "google_sql_database_instance" "emily" {
+  name             = "emily-db"
+  database_version = "POSTGRES_16"
+  region           = var.region
+  
+  settings {
+    tier                        = "db-custom-2-7680"
+    edition                     = "ENTERPRISE"
+    availability_type           = "HIGH_AVAILABILITY"
+    disk_size                   = 20
+    disk_autoresize             = true
+    disk_autoresize_limit       = 100
+    user_labels = {
+      "app" = "emily"
+    }
+    
+    # Backup
+    backup_configuration {
+      enabled                        = true
+      start_time                     = "03:00"
+      point_in_time_recovery_enabled = true
+      transaction_log_retention      = "7D"
+    }
+    
+    # Insights
+    insights_config {
+      query_insights_enabled = true
+    }
+  }
+  
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_sql_database" "emily" {
+  name     = "emily"
+  instance = google_sql_database_instance.emily.name
+}
+
+resource "google_sql_user" "emily" {
+  name     = "emily"
+  instance = google_sql_database_instance.emily.name
+  password = var.db_password
+}
+
+# ─── Cloud Memorystore (Redis) ───
+resource "google_redis_instance" "emily" {
+  name                    = "emily-redis"
+  memory_size_gb          = 1
+  tier                    = "BASIC"
+  redis_version           = "REDIS_7_0"
+  region                  = var.region
+  connect_mode            = "PRIVATE_SERVICE_ACCESS"
+  
+  authorized_network = google_compute_network.emily.id
+  
+  redis_configs = {
+    "maxmemory-policy" = "allkeys-lru"
+    "maxmemory-samples" = "5"
+  }
+}
+
+# ─── Cloud Storage ───
+resource "google_storage_bucket" "snapshots" {
+  name                          = "${var.project_id}-emily-snapshots"
+  location                      = "US"
+  uniform_bucket_level_access   = true
+  force_destroy                 = false
+  
+  versioning {
+    enabled = true
+  }
+  
+  lifecycle_rule {
+    condition {
+      age = 90
+    }
+    action {
+      type = "SetStorageClass"
+      storage_class = "COLDLINE"
+    }
+  }
+  
+  lifecycle_rule {
+    condition {
+      age = 365
+    }
+    action {
+      type = "Delete"
+    }
+  }
+}
+
+# ─── VPC & VPC Connector ───
+resource "google_compute_network" "emily" {
+  name                    = "emily-vpc"
+  auto_create_subnetworks = false
+}
+
+resource "google_compute_subnetwork" "emily" {
+  name          = "emily-subnet"
+  ip_cidr_range = "10.0.0.0/24"
+  region        = var.region
+  network       = google_compute_network.emily.name
+  
+  private_ip_google_access = true
+}
+
+resource "google_compute_global_address" "emily" {
+  name         = "emily-addr"
+  address_type = "INTERNAL"
+  purpose      = "VPC_PEERING"
+  ip_cidr_range = "10.19.0.0/16"
+  network      = google_compute_network.emily.name
+}
+
+resource "google_service_networking_connection" "emily" {
+  network                 = google_compute_network.emily.id
+  service                 = "servicenetworking.googleapis.com"
+  reserved_peering_ranges = [google_compute_global_address.emily.name]
+}
+
+resource "google_compute_firewall" "emily" {
+  name    = "emily-allow-health"
+  network = google_compute_network.emily.name
+  
+  allow {
+    protocol = "tcp"
+    ports    = ["8000"]
+  }
+  
+  source_ranges = ["130.211.0.0/22", "35.191.0.0/16"]
+  target_tags   = ["emily"]
+}
+
+# ─── VPC Connector for Cloud Run ───
+resource "google_compute_network_endpoint_group" "emily_vpc_connector" {
+  name                  = "emily-vpc-connector"
+  network_endpoint_type = "SERVERLESS"
+  region                = var.region
+  network               = google_compute_network.emily.name
+}
+
+resource "google_compute_region_network_endpoint_group" "emily_vpc_conn" {
+  name                  = "emily-vpc-connector"
+  network_endpoint_type = "SERVERLESS"
+  region                = var.region
+  default_port          = 8000
+}
+
+# ─── Secret Manager ───
+resource "google_secret_manager_secret" "firecrawl_api_key" {
+  secret_id = "firecrawl-api-key"
+  
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "firecrawl_api_key" {
+  secret_id = google_secret_manager_secret.firecrawl_api_key.id
+  secret_data = var.firecrawl_api_key
+}
+
+resource "google_secret_manager_secret" "secret_key" {
+  secret_id = "secret-key"
+  
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "secret_key" {
+  secret_id = google_secret_manager_secret.secret_key.id
+  secret_data = var.secret_key
+}
+
+# ─── Cloud Run Service (via Terraform) ───
+resource "google_cloud_run_v2_service" "api" {
+  name     = "emily-api"
+  location = var.region
+  ingress  = "INGRESS_TRAFFIC_ALL"
+  
+  template {
+    max_instance_duration = "5m"
+    scaling {
+      min_instance_count = 1
+      max_instance_count = 10
+    }
+    
+    vpc_access {
+      network_interfaces {
+        network = google_compute_network.emily.id
+        subnetwork = google_compute_subnetwork.emily.id
+        access_config {
+          network_tag = "emily"
+        }
+      }
+    }
+    
+    containers {
+      image = var.api_image
+      ports {
+        container_port = 8000
+      }
+      
+      env {
+        name  = "DATABASE_URL"
+        value = "postgresql://${google_sql_user.emily.name}:${google_secret_manager_secret_version.secret_key.secret_data}@/${google_sql_database.emily.name}"
+      }
+      
+      env {
+        name  = "REDIS_URL"
+        value = "redis://${google_redis_instance.emily.primary_address[0].address}:${google_redis_instance.emily.port}/0"
+      }
+      
+      env {
+        name  = "FIRECRAWL_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.firecrawl_api_key.secret_id
+            version = "latest"
+          }
+        }
+      }
+      
+      resources {
+        cpu_request    = "1"
+        memory_limit = "512Mi"
+        concurrency    = 80
+      }
+    }
+  }
+  
+  depends_on = [
+    google_service_networking_connection.emily,
+    google_compute_firewall.emily,
+  ]
+}
+```
+
+### 18.2 Project Structure for IaC
+
+```
+emily-web-delta/
++-- infra/
+|   +-- gcp/
+|   |   +-- main.tf              # All GCP resources
+|   |   +-- variables.tf         # Input variables
+|   |   +-- outputs.tf           # Output values (URLs, IPs)
+|   |   +-- terraform.tfvars     # Environment-specific values
+|   |   +-- modules/
+|   |       +-- cloud-run/       # Reusable Cloud Run module
+|   |       +-- cloud-sql/       # Reusable Cloud SQL module
+|   |       +-- cloud-redis/     # Reusable Memorystore module
+|   +-- k8s/                     # GKE manifests (if/when needed)
+|       +-- namespace.yaml
+|       +-- api-deployment.yaml
+|       +-- frontend-deployment.yaml
+|       +-- worker-deployment.yaml
+|       +-- service-account.yaml
+|       +-- network-policy.yaml
+```
+
+### 18.3 Terraform Workflow
+
+```bash
+# Initialize
+terraform init -backend-config="bucket=emily-terraform-state"
+
+# Plan
+terraform plan -var-file=infra/gcp/terraform.tfvars
+
+# Apply
+terraform apply -var-file=infra/gcp/terraform.tfvars
+
+# Destroy (cleanup)
+terraform destroy -var-file=infra/gcp/terraform.tfvars
+```
+
+---
+
+## 19. IMPLEMENTATION ROADMAP
+
+### Phase 0: Containerization Foundation (Week 0 — Parallel with Week 1)
+
+Containerization is the first step — everything must be Docker-ready before any deployment.
+
+```
+Week 0: Containerization
+  - Create backend/Dockerfile (multi-stage, non-root user, CloakBrowser baked in)
+  - Create frontend/Dockerfile (multi-stage, Nginx static serve)
+  - Create .dockerignore
+  - Update docker-compose.yml (asyncpg DSN, health checks, Celery Beat, service_healthy depends_on)
+  - Create nginx.conf for SPA routing (fallback to index.html)
+  - Create .github/workflows/ci-cd.yml (test + lint + build + deploy)
+  - Create cloudbuild.yaml (Cloud Build alternative)
+  - Create infra/gcp/ directory structure (Terraform scaffolding)
+  - Test: docker compose up — all services healthy
+  - Test: docker compose down && docker compose up — clean restart works
+  - Test: docker build --no-cache — reproducible builds
+```
 
 ### Phase 1: MVP (Weeks 1-4)
 
@@ -1974,7 +2940,7 @@ Deliverable: Full SaaS platform ready for launch
 
 ---
 
-## 17. TECHNOLOGY RECOMMENDATIONS SUMMARY
+## 20. TECHNOLOGY RECOMMENDATIONS SUMMARY
 
 | Component | Technology | Justification |
 |-----------|-----------|---------------|
@@ -2000,8 +2966,18 @@ Deliverable: Full SaaS platform ready for launch
 | **Testing** | pytest + httpx + factory-boy | Comprehensive testing |
 | **Monitoring** | Prometheus + Grafana | Metrics + dashboards |
 | **Error Tracking** | Sentry | Exception tracking, performance monitoring |
-| **Container** | Docker + Docker Compose | Dev and prod consistency |
-| **CI/CD** | GitHub Actions | Automated testing, building, deployment |
+| **Container** | Docker + Docker Compose | Multi-stage builds, non-root users, dev/prod parity |
+| **Frontend Server** | Nginx (Alpine) | Static serve, gzip, SPA fallback routing, ~25MB image |
+| **CI/CD** | GitHub Actions + Cloud Build | Automated test, lint, build, push, deploy |
+| **Cloud Build** | Google Cloud Build | Faster builds, Cloud Run source deployment, integrated with GCP |
+| **Production Platform** | Google Cloud Run (v2) | Auto-scale 0-N, pay-per-request, managed, VPC egress |
+| **Database (Prod)** | Google Cloud SQL PostgreSQL 16 | Multi-AZ HA, automated backups, point-in-time recovery |
+| **Cache (Prod)** | Google Cloud Memorystore Redis 7 | Managed Redis, Private Service Access |
+| **Object Storage (Prod)** | Google Cloud Storage | Versioning, lifecycle policies (COLDLINE archive, 365d delete) |
+| **Secrets** | Google Cloud Secret Manager | Encrypted, versioned, per-revision access control |
+| **DNS/WAF/CDN** | Cloudflare | Edge caching, WAF rules, SSL/TLS, DDoS protection |
+| **IaC** | Terraform (Google provider) | GCP infrastructure as code, state in GCS, modules for reuse |
+| **K8s (Scale)** | GKE Autopilot | Golden path defaults, Workload Identity, VPA, advanced datapath |
 | **Primary Backend** | Firecrawl Monitoring API | Scraping + AI diffing + structured extraction |
 | **Fallback Backend** | Self-hosted polling | Celery + CloakBrowser (stealth Chromium) + readability-lxml + difflib |
 | **Extraction Abstraction** | `ExtractionBackend` ABC | Common Python interface — `FirecrawlBackend` and `SelfHostedBackend` implement it. The rest of the codebase is backend-agnostic. |

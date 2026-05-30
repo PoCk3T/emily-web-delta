@@ -1,0 +1,30 @@
+# Emily Web Delta — Docker Ignore
+# Shared .dockerignore for both backend and frontend builds
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+
+# Git
+.git/
+.gitignore
+
+# Environment
+.env
+
+# Documentation (not needed in images)
+*.md
+
+# Tests (not needed in production images)
+tests/
+
+# Build artifacts
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/

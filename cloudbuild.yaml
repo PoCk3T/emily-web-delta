@@ -1,0 +1,81 @@
+# Emily Web Delta — Google Cloud Build Pipeline
+# Steps: test → build backend → build frontend → deploy to Cloud Run
+
+steps:
+  # ─── Test ───
+  - name: 'python:3.12-slim'
+    entrypoint: 'pip'
+    args: ['install', '-r', 'backend/requirements.txt']
+
+  - name: 'python:3.12-slim'
+    entrypoint: 'pytest'
+    args: ['-v', 'tests/']
+    dir: 'backend'
+
+  # ─── Build Backend Image ───
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'us-docker.pkg.dev/$PROJECT_ID/emily-repo/emily-api', '-f', 'backend/Dockerfile', '.']
+
+  # ─── Push Backend Image ───
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-docker.pkg.dev/$PROJECT_ID/emily-repo/emily-api']
+
+  # ─── Build Frontend Image ───
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'us-docker.pkg.dev/$PROJECT_ID/emily-repo/emily-frontend', '-f', 'frontend/Dockerfile', '.']
+
+  # ─── Push Frontend Image ───
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-docker.pkg.dev/$PROJECT_ID/emily-repo/emily-frontend']
+
+  # ─── Deploy API to Cloud Run ───
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud run deploy emily-api \
+          --image us-docker.pkg.dev/$PROJECT_ID/emily-repo/emily-api \
+          --region us-central1 \
+          --allow-unauthenticated \
+          --platform managed \
+          --memory 512Mi \
+          --cpu 1 \
+          --min-instances 1 \
+          --set-env-vars DATABASE_URL=postgresql://emily:emily@/emily \
+          --set-secrets FIRECRAWL_API_KEY=firecrawl-api-key:latest \
+          --set-secrets SECRET_KEY=secret-key:latest \
+          --vpc-connector emily-vpc-connector \
+          --quiet
+
+  # ─── Deploy Frontend to Cloud Run ───
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud run deploy emily-frontend \
+          --image us-docker.pkg.dev/$PROJECT_ID/emily-repo/emily-frontend \
+          --region us-central1 \
+          --allow-unauthenticated \
+          --platform managed \
+          --memory 128Mi \
+          --cpu 0.5 \
+          --min-instances 1 \
+          --quiet
+
+# ─── Run DB Migrations ───
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud run jobs execute emily-migrate \
+          --region $REGION \
+          --image us-docker.pkg.dev/$PROJECT_ID/emily-repo/emily-api \
+          --quiet
+
+# ─── Artifacts ───
+images:
+  - us-docker.pkg.dev/$PROJECT_ID/emily-repo/emily-api
+  - us-docker.pkg.dev/$PROJECT_ID/emily-repo/emily-frontend
