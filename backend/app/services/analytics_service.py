@@ -42,7 +42,6 @@ class AnalyticsService:
         frequency = total_changes / max(days, 1)
 
         # Trend detection
-        half_days = days // 2
         result = await self.db.execute(
             select(func.count(CheckResult.id))
             .where(
@@ -50,7 +49,7 @@ class AnalyticsService:
                 CheckResult.status == "changed",
             )
         )
-        recent_changes = result.scalar() or 0
+        _recent_changes = result.scalar() or 0
 
         trend = "stable"
         if total_changes > 0:

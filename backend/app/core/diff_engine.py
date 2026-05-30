@@ -35,8 +35,8 @@ async def compute_diff(
     )
 
     unified_diff = "\n".join(line_diff)
-    lines_added = len([l for l in line_diff if l.startswith("+") and not l.startswith("+++")])
-    lines_removed = len([l for l in line_diff if l.startswith("-") and not l.startswith("---")])
+    lines_added = len([line for line in line_diff if line.startswith("+") and not line.startswith("+++")])
+    lines_removed = len([line for line in line_diff if line.startswith("-") and not line.startswith("---")])
 
     # Semantic extraction
     semantic_changes = await extract_semantic_changes(previous_text, current_text)

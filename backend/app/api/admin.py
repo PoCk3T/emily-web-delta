@@ -33,7 +33,7 @@ async def admin_stats(db: AsyncSession = Depends(get_session)):
         "total_urls": url_count.scalar() or 0,
         "total_users": user_count.scalar() or 0,
         "total_checks": check_count.scalar() or 0,
-        "active_urls": (await db.execute(select(func.count(Url.id)).where(Url.enabled == True))).scalar() or 0,
+        "active_urls": (await db.execute(select(func.count(Url.id)).where(Url.enabled))).scalar() or 0,
     }
 
 

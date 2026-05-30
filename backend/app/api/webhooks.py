@@ -16,21 +16,21 @@ async def firecrawl_webhook(request: Request):
     if event_type == "monitor.page":
         for page in payload.get("data", []):
             # Store check result
-            check_id = page.get("checkId")
-            url = page.get("url", "")
-            status = page.get("status", "unknown")
-            is_meaningful = page.get("isMeaningful", False)
-            judgment = page.get("judgment")
-            diff_text = page.get("diff", {}).get("text", "") if isinstance(page.get("diff"), dict) else ""
-            diff_json = page.get("diff", {}).get("json") if isinstance(page.get("diff"), dict) else None
-            snapshot_json = page.get("snapshot", {}).get("json") if isinstance(page.get("snapshot"), dict) else None
+            _check_id = page.get("checkId")
+            _url = page.get("url", "")
+            _status = page.get("status", "unknown")
+            _is_meaningful = page.get("isMeaningful", False)
+            _judgment = page.get("judgment")
+            _diff_text = page.get("diff", {}).get("text", "") if isinstance(page.get("diff"), dict) else ""
+            _diff_json = page.get("diff", {}).get("json") if isinstance(page.get("diff"), dict) else None
+            _snapshot_json = page.get("snapshot", {}).get("json") if isinstance(page.get("snapshot"), dict) else None
 
             # In production: store to database
-            # await store_check_result(check_id, url, status, ...)
+            # await store_check_result(_check_id, _url, _status, ...)
 
     elif event_type == "monitor.check.completed":
         for check in payload.get("data", []):
-            summary = check.get("summary", {})
+            _summary = check.get("summary", {})
             # Store summary
             # await store_check_summary(...)
 

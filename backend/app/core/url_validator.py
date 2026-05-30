@@ -40,7 +40,7 @@ def validate_url(url: str) -> tuple[bool, str]:
     # Block internal/private IPs
     hostname = parsed.hostname.lower()
     for pattern in INTERNAL_PATTERNS:
-        if re.match(pattern, url, re.IGNORECASE):
+        if re.match(pattern, hostname, re.IGNORECASE):
             return False, "URL points to internal/private network"
 
     # Check for suspicious protocols
