@@ -1,0 +1,68 @@
+# ─── Node.js ───
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# ─── Python ───
+backend/.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# ─── Environment / Secrets ───
+.env
+.env.*
+!.env.example
+
+# ─── IDE / Editor ───
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# ─── Docker volumes ───
+postgres_data/
+minio_data/
+
+# ─── Logs ───
+*.log
+logs/
+
+# ─── OS files ───
+Thumbs.db
+desktop.ini
+
+# ─── Coverage ───
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# ─── Terraform (infra) ───
+infra/gcp/.terraform/
+infra/gcp/.terraform.lock.hcl
+infra/gcp/terraform.tfstate
+infra/gcp/terraform.tfstate.backup
+
+# ─── Alembic revisions (keep env.py, exclude generated revisions) ───
+# (keep alembic/ directory structure, but exclude auto-generated env files)
+# app/db/alembic/env.py is kept
+
+# ─── Temporary / scratch ───
+tmp/
+temp/
+*.tmp
+*.bak

@@ -1,0 +1,150 @@
+# Emily Web Delta — CI/CD Pipeline (GitHub Actions)
+# Triggers: push/PR to main
+# Jobs: test → build → deploy
+
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: us-docker.pkg.dev
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REPO: emily-repo
+
+jobs:
+  # ─── Test ───
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: emily_test
+          POSTGRES_USER: emily
+          POSTGRES_PASSWORD: emily
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov
+
+      - name: Run linter
+        run: |
+          cd backend
+          ruff check app/ tests/ --fix
+
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql+asyncpg://emily:emily@localhost:5432/emily_test
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          cd backend
+          pytest tests/ -v --cov=app --cov-report=xml
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+
+  # ─── Build & Push Images ───
+  build:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure gcloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker $REGISTRY --quiet
+
+      - name: Build & push backend image
+        run: |
+          IMAGE_TAG="${REGISTRY}/${PROJECT_ID}/${REPO}/emily-api:${{ github.sha }}"
+          docker build -t "$IMAGE_TAG" -f backend/Dockerfile .
+          docker push "$IMAGE_TAG"
+
+      - name: Build & push frontend image
+        run: |
+          IMAGE_TAG="${REGISTRY}/${PROJECT_ID}/${REPO}/emily-frontend:${{ github.sha }}"
+          docker build -t "$IMAGE_TAG" -f frontend/Dockerfile .
+          docker push "$IMAGE_TAG"
+
+  # ─── Deploy to Cloud Run ───
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Configure gcloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Deploy API
+        run: |
+          gcloud run deploy emily-api \
+            --image "${REGISTRY}/${PROJECT_ID}/${REPO}/emily-api:${{ github.sha }}" \
+            --region us-central1 \
+            --allow-unauthenticated \
+            --platform managed \
+            --memory 512Mi \
+            --cpu 1 \
+            --min-instances 1 \
+            --set-secrets FIRECRAWL_API_KEY=firecrawl-api-key:latest \
+            --set-secrets SECRET_KEY=secret-key:latest \
+            --vpc-connector emily-vpc-connector \
+            --quiet
+
+      - name: Deploy Frontend
+        run: |
+          gcloud run deploy emily-frontend \
+            --image "${REGISTRY}/${PROJECT_ID}/${REPO}/emily-frontend:${{ github.sha }}" \
+            --region us-central1 \
+            --allow-unauthenticated \
+            --platform managed \
+            --memory 128Mi \
+            --cpu 0.5 \
+            --min-instances 1 \
+            --quiet
+
+      - name: Run DB migrations
+        run: |
+          gcloud run jobs execute emily-migrate \
+            --region us-central1 \
+            --image "${REGISTRY}/${PROJECT_ID}/${REPO}/emily-api:${{ github.sha }}" \
+            --set-env-vars DATABASE_URL="postgresql://emily:${{ secrets.DB_PASSWORD }}@/${{ vars.DB_NAME }}" \
+            --set-env-vars REDIS_URL="redis://${{ vars.REDIS_ADDRESS }}:6379/0" \
+            --set-secrets FIRECRAWL_API_KEY=firecrawl-api-key:latest \
+            --set-secrets SECRET_KEY=secret-key:latest \
+            --vpc-connector emily-vpc-connector \
+            --quiet
