@@ -63,7 +63,4 @@ from app.models.firecrawl_monitor import FirecrawlMonitor  # noqa: E402
 from app.models.api_key import ApiKey  # noqa: E402
 
 # Configure remote_side after all models are loaded (avoids circular import).
-import importlib  # noqa: E402
-
-_User = importlib.import_module("app.models.user").User  # noqa: E402
-Tenant.owner.property.remote_side = {_User.__table__.c.tenant_id}  # noqa: E402
+Tenant.owner.property.remote_side = {User.__table__.c.tenant_id}  # noqa: E402
