@@ -62,23 +62,3 @@ async def db_session():
     """Test database session."""
     async with async_session() as session:
         yield session
-
-
-@pytest.fixture(autouse=True)
-async def seed_default_tenant(setup_db):
-    """Create a default tenant for tests."""
-    import uuid
-    from app.models.tenant import Tenant
-
-    async with async_session() as session:
-        # Create a default tenant
-        tenant = Tenant(
-            id=uuid.uuid4(),
-            name="Test Tenant",
-            is_active=True,
-        )
-        session.add(tenant)
-        await session.commit()
-        await session.refresh(tenant)
-        # Store tenant id in app state so auth can use it
-        app.state._test_tenant_id = tenant.id

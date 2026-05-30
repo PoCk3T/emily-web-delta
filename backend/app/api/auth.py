@@ -176,6 +176,8 @@ async def reset_password(request: PasswordResetConfirm, db: AsyncSession = Depen
 @router.get("/auth/me")
 async def get_me(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_session)):
     """Get current user profile."""
+    from uuid import UUID
+
     payload = decode_token(token)
     if not payload:
         raise HTTPException(
@@ -183,7 +185,7 @@ async def get_me(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends
             detail="Invalid token",
         )
 
-    result = await db.execute(select(User).where(User.id == payload.get("sub")))
+    result = await db.execute(select(User).where(User.id == UUID(payload.get("sub"))))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(
