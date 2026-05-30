@@ -37,6 +37,7 @@ class Tenant(Base):
     # Relationships
     owner: Mapped["User"] = relationship(
         "User", lazy="selectin",
+        primaryjoin="User.tenant_id == Tenant.id",
     )
     urls: Mapped[List["Url"]] = relationship(
         "Url", back_populates="tenant", lazy="select"
