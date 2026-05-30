@@ -3,7 +3,10 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text
+from typing import List
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, and_
+from sqlalchemy.orm import ColumnProperty, foreign
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -33,18 +36,19 @@ class Tenant(Base):
 
     # Relationships
     owner: Mapped["User"] = relationship(
-        "User", back_populates="tenant", lazy="selectin"
+        "User", back_populates="tenant", lazy="selectin",
+        remote_side="User.tenant_id",
     )
-    urls: Mapped[list["Url"]] = relationship(
+    urls: Mapped[List["Url"]] = relationship(
         "Url", back_populates="tenant", lazy="select"
     )
-    notification_rules: Mapped[list["NotificationRule"]] = relationship(
+    notification_rules: Mapped[List["NotificationRule"]] = relationship(
         "NotificationRule", back_populates="tenant", lazy="select"
     )
-    firecrawl_monitors: Mapped[list["FirecrawlMonitor"]] = relationship(
+    firecrawl_monitors: Mapped[List["FirecrawlMonitor"]] = relationship(
         "FirecrawlMonitor", back_populates="tenant", lazy="select"
     )
-    api_keys: Mapped[list["ApiKey"]] = relationship(
+    api_keys: Mapped[List["ApiKey"]] = relationship(
         "ApiKey", back_populates="tenant", lazy="select"
     )
 
