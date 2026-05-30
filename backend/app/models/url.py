@@ -3,6 +3,7 @@
 import uuid
 from datetime import datetime, timezone
 
+from typing import Any, List, Optional, Union
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -66,9 +67,7 @@ class Url(Base):
     js_required: Mapped[bool] = mapped_column(Boolean, default=False)
     max_retries: Mapped[int] = mapped_column(Integer, default=3)
     user_agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    tags: Mapped[list[str] | None] = mapped_column(
-        sa_type=JSON, nullable=True
-    )
+    tags: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
     firecrawl_config: Mapped[dict | None] = mapped_column(
         JSON, nullable=True
     )
@@ -88,16 +87,16 @@ class Url(Base):
     tenant: Mapped["Tenant"] = relationship(
         "Tenant", back_populates="urls", lazy="selectin"
     )
-    snapshots: Mapped[list["Snapshot"]] = relationship(
+    snapshots: Mapped[List["Snapshot"]] = relationship(
         "Snapshot", back_populates="url", lazy="select"
     )
-    diffs: Mapped[list["Diff"]] = relationship(
+    diffs: Mapped[List["Diff"]] = relationship(
         "Diff", back_populates="url", lazy="select"
     )
-    check_results: Mapped[list["CheckResult"]] = relationship(
+    check_results: Mapped[List["CheckResult"]] = relationship(
         "CheckResult", back_populates="url", lazy="select"
     )
-    firecrawl_monitors: Mapped[list["FirecrawlMonitor"]] = relationship(
+    firecrawl_monitors: Mapped[List["FirecrawlMonitor"]] = relationship(
         "FirecrawlMonitor", back_populates="url", lazy="select"
     )
 
