@@ -60,7 +60,7 @@ async def seed_user():
 
     async with async_session_factory() as db:
         # Check if user already exists
-        result = await db.execute(select(User).where(User.email == "admin@emily.dev"))
+        result = await db.execute(select(User).where(User.email == "emily@lclglaw.com"))
         existing = result.scalar_one_or_none()
         if existing:
             print(f"User {existing.email} already exists (id={existing.id})")
@@ -75,7 +75,7 @@ async def seed_user():
 
             # Create user
             user = User(
-                email="admin@emily.dev",
+                email="emily@lclglaw.com",
                 name="Admin",
                 password_hash=hash_password("emilyadmin123"),
                 is_active=True,

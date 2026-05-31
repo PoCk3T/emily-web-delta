@@ -1,6 +1,6 @@
 """Seed admin user and default monitoring URLs.
 
-Populates the first admin user (admin@emily.dev) and six default
+Populates the first admin user (emily@lclglaw.com) and six default
 monitored URLs (Terms of Service and Privacy Policy for OpenAI,
 Google/Gemini, and Anthropic). Idempotent — safe to run multiple times.
 
@@ -122,14 +122,14 @@ def upgrade() -> None:
     )
 
     existing_user = conn.execute(
-        sa.select(user_table.c.id).where(user_table.c.email == "admin@emily.dev")
+        sa.select(user_table.c.id).where(user_table.c.email == "emily@lclglaw.com")
     ).scalar_one_or_none()
 
     if not existing_user:
         conn.execute(
             user_table.insert().values(
                 id=uuid4(),
-                email="admin@emily.dev",
+                email="emily@lclglaw.com",
                 name="Admin",
                 password_hash=_hash_password("emilyadmin123"),
                 tenant_id=tenant_id,
@@ -139,7 +139,7 @@ def upgrade() -> None:
                 updated_at=now,
             )
         )
-        print("Seeded admin user: admin@emily.dev")
+        print("Seeded admin user: emily@lclglaw.com")
 
     # --- Seed default URLs ---
     url_table = sa.table(
@@ -224,7 +224,7 @@ def downgrade() -> None:
     conn.execute(
         user_table.delete().where(
             sa.and_(
-                user_table.c.email == "admin@emily.dev",
+                user_table.c.email == "emily@lclglaw.com",
                 user_table.c.tenant_id
                 == sa.select(
                     sa.table("tenants", sa.column("id", PG_UUID(as_uuid=True))).c.id
