@@ -23,8 +23,7 @@ async def url_analytics(
 
     # Count checks in the period
     result = await db.execute(
-        select(func.count(CheckResult.id))
-        .where(
+        select(func.count(CheckResult.id)).where(
             CheckResult.url_id == UUID(url_id),
             CheckResult.created_at >= func.now() - func.interval(f"{days} days"),
         )
@@ -33,8 +32,7 @@ async def url_analytics(
 
     # Count changes
     result = await db.execute(
-        select(func.count(CheckResult.id))
-        .where(
+        select(func.count(CheckResult.id)).where(
             CheckResult.url_id == UUID(url_id),
             CheckResult.created_at >= func.now() - func.interval(f"{days} days"),
             CheckResult.status == "changed",
@@ -48,8 +46,7 @@ async def url_analytics(
     # Trend detection (simple: compare recent vs older changes)
     half_days = days // 2
     result = await db.execute(
-        select(func.count(CheckResult.id))
-        .where(
+        select(func.count(CheckResult.id)).where(
             CheckResult.url_id == UUID(url_id),
             CheckResult.created_at >= func.now() - func.interval(f"{half_days} days"),
             CheckResult.status == "changed",
@@ -58,8 +55,7 @@ async def url_analytics(
     recent_changes = result.scalar() or 0
 
     result = await db.execute(
-        select(func.count(CheckResult.id))
-        .where(
+        select(func.count(CheckResult.id)).where(
             CheckResult.url_id == UUID(url_id),
             CheckResult.created_at < func.now() - func.interval(f"{half_days} days"),
             CheckResult.created_at >= func.now() - func.interval(f"{days} days"),
@@ -100,12 +96,13 @@ async def platform_analytics(
     db: AsyncSession = Depends(get_session),
 ):
     """Platform-wide analytics."""
+    from app.models.diff import Diff
+
     result = await db.execute(select(func.count(CheckResult.id)))
     total_checks = result.scalar() or 0
 
-    result = await db.execute(
-        select(func.count(CheckResult.id)).where(CheckResult.status == "changed")
-    )
+    # Query the actual count of Diff records in the url_diffs table
+    result = await db.execute(select(func.count(Diff.id)))
     total_changes = result.scalar() or 0
 
     return {

@@ -1,6 +1,7 @@
 """URL management API routes."""
 
 from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -62,7 +63,9 @@ class UrlResponse(BaseModel):
 
 
 @router.post("/urls", response_model=UrlResponse, status_code=status.HTTP_201_CREATED)
-async def create_url(request: UrlCreateRequest, db: AsyncSession = Depends(get_session)):
+async def create_url(
+    request: UrlCreateRequest, db: AsyncSession = Depends(get_session)
+):
     """Create a new URL to monitor."""
     valid, error = validate_url(request.url)
     if not valid:
@@ -129,7 +132,9 @@ async def list_urls(
         query = query.where(Url.tags.contains([tag]))
 
     # Count total
-    count_result = await db.execute(select(Url).where(query.whereclause if hasattr(query, 'whereclause') else True))
+    count_result = await db.execute(
+        select(Url).where(query.whereclause if hasattr(query, "whereclause") else True)
+    )
     total = len(count_result.scalars().all())
 
     # Paginate
@@ -166,13 +171,17 @@ async def list_urls(
 
 
 @router.get("/urls/{url_id}", response_model=UrlResponse)
-async def get_url(url_id: str, db: AsyncSession = Depends(get_session)):
+async def get_url(url_id: UUID, db: AsyncSession = Depends(get_session)):
     """Get URL details."""
-    from uuid import UUID
-    result = await db.execute(select(Url).options(selectinload(Url.snapshots)).where(Url.id == UUID(url_id)))
+
+    result = await db.execute(
+        select(Url).options(selectinload(Url.snapshots)).where(Url.id == url_id)
+    )
     url = result.scalar_one_or_none()
     if not url:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="URL not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="URL not found"
+        )
 
     return UrlResponse(
         id=str(url.id),
@@ -191,13 +200,19 @@ async def get_url(url_id: str, db: AsyncSession = Depends(get_session)):
 
 
 @router.put("/urls/{url_id}", response_model=UrlResponse)
-async def update_url(url_id: str, request: UrlUpdateRequest, db: AsyncSession = Depends(get_session)):
+async def update_url(
+    url_id: UUID, request: UrlUpdateRequest, db: AsyncSession = Depends(get_session)
+):
     """Update URL configuration."""
-    from uuid import UUID
-    result = await db.execute(select(Url).options(selectinload(Url.snapshots)).where(Url.id == UUID(url_id)))
+
+    result = await db.execute(
+        select(Url).options(selectinload(Url.snapshots)).where(Url.id == url_id)
+    )
     url = result.scalar_one_or_none()
     if not url:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="URL not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="URL not found"
+        )
 
     if request.url:
         valid, error = validate_url(request.url)
@@ -227,26 +242,30 @@ async def update_url(url_id: str, request: UrlUpdateRequest, db: AsyncSession = 
 
 
 @router.delete("/urls/{url_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_url(url_id: str, db: AsyncSession = Depends(get_session)):
+async def delete_url(url_id: UUID, db: AsyncSession = Depends(get_session)):
     """Delete a URL."""
-    from uuid import UUID
-    result = await db.execute(select(Url).where(Url.id == UUID(url_id)))
+
+    result = await db.execute(select(Url).where(Url.id == url_id))
     url = result.scalar_one_or_none()
     if not url:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="URL not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="URL not found"
+        )
 
     await db.delete(url)
     await db.commit()
 
 
 @router.patch("/urls/{url_id}/enable")
-async def enable_url(url_id: str, db: AsyncSession = Depends(get_session)):
+async def enable_url(url_id: UUID, db: AsyncSession = Depends(get_session)):
     """Enable URL monitoring."""
-    from uuid import UUID
-    result = await db.execute(select(Url).where(Url.id == UUID(url_id)))
+
+    result = await db.execute(select(Url).where(Url.id == url_id))
     url = result.scalar_one_or_none()
     if not url:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="URL not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="URL not found"
+        )
 
     url.enabled = True
     await db.commit()
@@ -254,13 +273,15 @@ async def enable_url(url_id: str, db: AsyncSession = Depends(get_session)):
 
 
 @router.patch("/urls/{url_id}/disable")
-async def disable_url(url_id: str, db: AsyncSession = Depends(get_session)):
+async def disable_url(url_id: UUID, db: AsyncSession = Depends(get_session)):
     """Disable URL monitoring."""
-    from uuid import UUID
-    result = await db.execute(select(Url).where(Url.id == UUID(url_id)))
+
+    result = await db.execute(select(Url).where(Url.id == url_id))
     url = result.scalar_one_or_none()
     if not url:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="URL not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="URL not found"
+        )
 
     url.enabled = False
     await db.commit()
@@ -268,27 +289,41 @@ async def disable_url(url_id: str, db: AsyncSession = Depends(get_session)):
 
 
 @router.post("/urls/{url_id}/check-now")
-async def check_now(url_id: str, db: AsyncSession = Depends(get_session)):
+async def check_now(url_id: UUID, db: AsyncSession = Depends(get_session)):
     """Trigger an immediate check for a URL."""
-    from uuid import UUID
-    result = await db.execute(select(Url).where(Url.id == UUID(url_id)))
+
+    result = await db.execute(select(Url).where(Url.id == url_id))
     url = result.scalar_one_or_none()
     if not url:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="URL not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="URL not found"
+        )
 
     url.last_checked = None
     await db.commit()
+
+    # Trigger immediate celery poll
+    try:
+        from app.workers.polling import poll_urls
+
+        poll_urls.delay([str(url.id)])
+    except Exception as e:
+        # Fallback if celery is not running (e.g. in test env)
+        pass
+
     return {"message": "Check queued", "url_id": str(url.id)}
 
 
 @router.get("/urls/{url_id}/health")
-async def url_health(url_id: str, db: AsyncSession = Depends(get_session)):
+async def url_health(url_id: UUID, db: AsyncSession = Depends(get_session)):
     """Get URL health status."""
-    from uuid import UUID
-    result = await db.execute(select(Url).where(Url.id == UUID(url_id)))
+
+    result = await db.execute(select(Url).where(Url.id == url_id))
     url = result.scalar_one_or_none()
     if not url:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="URL not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="URL not found"
+        )
 
     return {
         "url_id": str(url.id),

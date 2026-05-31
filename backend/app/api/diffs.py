@@ -1,6 +1,7 @@
 """Diff API routes."""
 
-from fastapi import APIRouter, Depends
+from typing import Optional
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,6 +9,56 @@ from app.db.session import get_session
 from app.models.diff import Diff
 
 router = APIRouter()
+
+
+@router.get("/diffs")
+async def list_global_diffs(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    urlId: Optional[str] = None,
+    db: AsyncSession = Depends(get_session),
+):
+    """List all global diffs with camelCase response formatting for the frontend."""
+    from uuid import UUID
+
+    query = select(Diff)
+    if urlId:
+        query = query.where(Diff.url_id == UUID(urlId))
+
+    query = query.order_by(Diff.created_at.desc())
+
+    result = await db.execute(query)
+    all_diffs = result.scalars().all()
+    total = len(all_diffs)
+
+    offset = (page - 1) * per_page
+    diffs = all_diffs[offset : offset + per_page]
+
+    return {
+        "data": {
+            "items": [
+                {
+                    "id": str(d.id),
+                    "checkId": str(d.snapshot_to_id),
+                    "urlId": str(d.url_id),
+                    "previousChecksum": str(d.snapshot_from_id)
+                    if d.snapshot_from_id
+                    else None,
+                    "currentChecksum": str(d.snapshot_to_id),
+                    "diffContent": d.diff_content or "",
+                    "diffType": d.diff_type,
+                    "summary": f"Lines added: {d.lines_added}, lines removed: {d.lines_removed}",
+                    "aiSummary": None,
+                    "createdAt": d.created_at.isoformat(),
+                }
+                for d in diffs
+            ],
+            "total": total,
+            "page": page,
+            "pageSize": per_page,
+            "totalPages": (total + per_page - 1) // per_page if total > 0 else 1,
+        }
+    }
 
 
 @router.get("/urls/{url_id}/diffs")
@@ -78,7 +129,9 @@ async def get_diff(url_id: str, diff_id: str, db: AsyncSession = Depends(get_ses
 
 
 @router.get("/urls/{url_id}/diffs/{diff_id}/rendered")
-async def get_diff_rendered(url_id: str, diff_id: str, db: AsyncSession = Depends(get_session)):
+async def get_diff_rendered(
+    url_id: str, diff_id: str, db: AsyncSession = Depends(get_session)
+):
     """Get rendered HTML diff."""
     from fastapi import HTTPException
     from uuid import UUID
@@ -101,7 +154,9 @@ async def get_diff_rendered(url_id: str, diff_id: str, db: AsyncSession = Depend
 
 
 @router.get("/urls/{url_id}/diffs/{diff_id}/download")
-async def get_diff_download(url_id: str, diff_id: str, db: AsyncSession = Depends(get_session)):
+async def get_diff_download(
+    url_id: str, diff_id: str, db: AsyncSession = Depends(get_session)
+):
     """Download diff as HTML/JSON."""
     from fastapi import HTTPException
     from uuid import UUID

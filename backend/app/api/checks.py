@@ -12,6 +12,61 @@ from app.models.check_result import CheckResult
 router = APIRouter()
 
 
+@router.get("/checks")
+async def list_global_checks(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    urlId: Optional[str] = None,
+    db: AsyncSession = Depends(get_session),
+):
+    """List all global check results with camelCase key responses for the frontend."""
+    from uuid import UUID
+
+    query = select(CheckResult)
+    if urlId:
+        query = query.where(CheckResult.url_id == UUID(urlId))
+
+    query = query.order_by(CheckResult.created_at.desc())
+
+    result = await db.execute(query)
+    all_checks = result.scalars().all()
+    total = len(all_checks)
+
+    offset = (page - 1) * per_page
+    checks = all_checks[offset : offset + per_page]
+
+    return {
+        "data": {
+            "items": [
+                {
+                    "id": str(c.id),
+                    "urlId": str(c.url_id),
+                    "url": c.url.url if c.url else "N/A",
+                    "urlName": c.url.name if c.url else "N/A",
+                    "status": c.status,
+                    "statusCode": c.status_code
+                    or (200 if c.status == "completed" else 500),
+                    "contentLength": c.diff_size or 0,
+                    "checksum": c.content_hash,
+                    "pageTitle": c.judgment.get("title")
+                    if (c.judgment and isinstance(c.judgment, dict))
+                    else "N/A",
+                    "loadTime": c.check_duration_ms or 100,
+                    "error": c.error_message,
+                    "startedAt": c.created_at.isoformat(),
+                    "completedAt": c.created_at.isoformat(),
+                    "createdAt": c.created_at.isoformat(),
+                }
+                for c in checks
+            ],
+            "total": total,
+            "page": page,
+            "pageSize": per_page,
+            "totalPages": (total + per_page - 1) // per_page if total > 0 else 1,
+        }
+    }
+
+
 @router.get("/urls/{url_id}/checks")
 async def list_checks(
     url_id: str,
@@ -56,7 +111,9 @@ async def list_checks(
 
 
 @router.get("/urls/{url_id}/checks/{check_id}")
-async def get_check(url_id: str, check_id: str, db: AsyncSession = Depends(get_session)):
+async def get_check(
+    url_id: str, check_id: str, db: AsyncSession = Depends(get_session)
+):
     """Get a specific check result."""
     from uuid import UUID
 
@@ -69,6 +126,7 @@ async def get_check(url_id: str, check_id: str, db: AsyncSession = Depends(get_s
     check = result.scalar_one_or_none()
     if not check:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=404, detail="Check not found")
 
     return {
@@ -89,7 +147,9 @@ async def get_check(url_id: str, check_id: str, db: AsyncSession = Depends(get_s
 
 
 @router.get("/urls/{url_id}/checks/{check_id}/diff")
-async def get_check_diff(url_id: str, check_id: str, db: AsyncSession = Depends(get_session)):
+async def get_check_diff(
+    url_id: str, check_id: str, db: AsyncSession = Depends(get_session)
+):
     """Get rendered diff for a check."""
     from fastapi import HTTPException
     from uuid import UUID

@@ -28,7 +28,10 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 }
 
 function LoginScreen() {
-  const { isAuthenticated, initialize } = useAuthStore();
+  const { isAuthenticated, initialize, login, isLoading } = useAuthStore();
+  const [email, setEmail] = React.useState('');
+  const [password, setPassword] = React.useState('');
+  const [error, setError] = React.useState<string | null>(null);
 
   useEffect(() => {
     initialize();
@@ -37,6 +40,16 @@ function LoginScreen() {
   if (isAuthenticated) {
     return <Navigate to={ROUTES.dashboard} replace />;
   }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    try {
+      await login(email, password);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.message || 'Login failed');
+    }
+  };
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-gray-900">
@@ -50,17 +63,36 @@ function LoginScreen() {
             Web page change monitoring platform
           </p>
         </div>
-        <form className="space-y-4">
+        <form className="space-y-4" onSubmit={handleSubmit}>
+          {error && (
+            <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/30 dark:text-red-400">
+              {error}
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Email</label>
-            <input type="email" className="mt-1 input" placeholder="you@example.com" />
+            <input
+              type="email"
+              className="mt-1 input"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Password</label>
-            <input type="password" className="mt-1 input" placeholder="••••••••" />
+            <input
+              type="password"
+              className="mt-1 input"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
           </div>
-          <button type="submit" className="btn-primary w-full">
-            Sign In
+          <button type="submit" className="btn-primary w-full" disabled={isLoading}>
+            {isLoading ? 'Signing In...' : 'Sign In'}
           </button>
         </form>
         <p className="mt-4 text-center text-sm text-gray-500 dark:text-gray-400">
