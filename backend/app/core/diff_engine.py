@@ -20,26 +20,63 @@ class DiffResult:
     diff_size: int = 0
 
 
+def strip_hyperlink_targets(content: str) -> str:
+    """Strips underlying hyperlink targets, keeping only the visible anchor text.
+
+    Acts on both HTML anchor tags and Markdown links:
+      - Markdown: [OpenAI Privacy Policy](https://openai.com/privacy) -> OpenAI Privacy Policy
+      - HTML: <a href="https://openai.com/privacy">Privacy Policy</a> -> Privacy Policy
+    """
+    if not content:
+        return ""
+
+    # 1. HTML anchor tags: replace <a href="...">text</a> with text
+    content = re.sub(
+        r"<a\s+[^>]*>(.*?)</a>", r"\1", content, flags=re.IGNORECASE | re.DOTALL
+    )
+
+    # 2. Markdown link syntax: replace [text](url) with text
+    content = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", content)
+
+    return content
+
+
 async def compute_diff(
     previous_text: str,
     current_text: str,
 ) -> DiffResult:
     """Compute a diff between two text snapshots."""
+    # Strip hyperlink targets to ignore raw link differences
+    clean_prev = strip_hyperlink_targets(previous_text)
+    clean_curr = strip_hyperlink_targets(current_text)
+
     # Line-level unified diff
     line_diff = list(
         difflib.unified_diff(
-            previous_text.splitlines(),
-            current_text.splitlines(),
+            clean_prev.splitlines(),
+            clean_curr.splitlines(),
             lineterm="",
         )
     )
 
     unified_diff = "\n".join(line_diff)
-    lines_added = len([line for line in line_diff if line.startswith("+") and not line.startswith("+++")])
-    lines_removed = len([line for line in line_diff if line.startswith("-") and not line.startswith("---")])
+    lines_added = len(
+        [
+            line
+            for line in line_diff
+            if line.startswith("+") and not line.startswith("+++")
+        ]
+    )
+    lines_removed = len(
+        [
+            line
+            for line in line_diff
+            if line.startswith("-") and not line.startswith("---")
+        ]
+    )
 
     # Semantic extraction
-    semantic_changes = await extract_semantic_changes(previous_text, current_text)
+    semantic_changes = await extract_semantic_changes(clean_prev, clean_curr)
 
     return DiffResult(
         unified_diff=unified_diff,
@@ -62,21 +99,25 @@ async def extract_semantic_changes(
     prev_prices = set(price_pattern.findall(previous))
     curr_prices = set(price_pattern.findall(current))
     if prev_prices != curr_prices:
-        changes.append({
-            "type": "price",
-            "removed": list(prev_prices - curr_prices),
-            "added": list(curr_prices - prev_prices),
-        })
+        changes.append(
+            {
+                "type": "price",
+                "removed": list(prev_prices - curr_prices),
+                "added": list(curr_prices - prev_prices),
+            }
+        )
 
     # Date patterns
     date_pattern = re.compile(r"\d{4}-\d{2}-\d{2}")
     prev_dates = set(date_pattern.findall(previous))
     curr_dates = set(date_pattern.findall(current))
     if prev_dates != curr_dates:
-        changes.append({
-            "type": "date",
-            "removed": list(prev_dates - curr_dates),
-            "added": list(curr_dates - prev_dates),
-        })
+        changes.append(
+            {
+                "type": "date",
+                "removed": list(prev_dates - curr_dates),
+                "added": list(curr_dates - prev_dates),
+            }
+        )
 
     return changes

@@ -49,10 +49,11 @@ class Scheduler:
             goal=url.goal if hasattr(url, "goal") else None,
         )
 
-        # Compute hash
-        content_hash = hashlib.sha256(
-            result.content.encode()
-        ).hexdigest()
+        # Compute hash (ignoring raw hyperlink changes)
+        from app.core.diff_engine import strip_hyperlink_targets
+
+        clean_content = strip_hyperlink_targets(result.content)
+        content_hash = hashlib.sha256(clean_content.encode()).hexdigest()
 
         # Compare with last snapshot
         status = "same"
