@@ -3,6 +3,149 @@ import { formatRelative } from '../lib/utils';
 import { GitCompare, Loader2, Sparkles } from 'lucide-react';
 import { useState } from 'react';
 
+// Unified Diff Row Extractor
+function parseUnifiedDiff(diffText: string) {
+  if (!diffText) return [];
+  const lines = diffText.split('\n');
+  return lines.map((line, idx) => {
+    let type: 'addition' | 'deletion' | 'info' | 'normal' = 'normal';
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      type = 'addition';
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      type = 'deletion';
+    } else if (line.startsWith('@@')) {
+      type = 'info';
+    }
+    return { id: idx, line, type };
+  });
+}
+
+// Side-by-Side Diff Line Extractor
+function parseSideBySideDiff(diffText: string) {
+  if (!diffText) return [];
+  const lines = diffText.split('\n');
+  const rows: Array<{
+    id: number;
+    left: { line: string; type: 'deletion' | 'normal' | 'empty' };
+    right: { line: string; type: 'addition' | 'normal' | 'empty' };
+  }> = [];
+
+  let lineIdx = 0;
+  while (lineIdx < lines.length) {
+    const line = lines[lineIdx];
+
+    if (line.startsWith('---') || line.startsWith('+++') || line.startsWith('@@')) {
+      rows.push({
+        id: lineIdx,
+        left: { line, type: 'normal' },
+        right: { line, type: 'normal' }
+      });
+      lineIdx++;
+    } else if (line.startsWith('-')) {
+      // Deletion on left. Check if next line is an addition on right
+      let rightLine = '';
+      let rightType: 'addition' | 'empty' = 'empty';
+      if (lineIdx + 1 < lines.length && lines[lineIdx + 1].startsWith('+')) {
+        rightLine = lines[lineIdx + 1].substring(1);
+        rightType = 'addition';
+        lineIdx += 2;
+      } else {
+        lineIdx++;
+      }
+      rows.push({
+        id: lineIdx,
+        left: { line: line.substring(1), type: 'deletion' },
+        right: { line: rightLine, type: rightType }
+      });
+    } else if (line.startsWith('+')) {
+      // Addition on right (no deletion on left)
+      rows.push({
+        id: lineIdx,
+        left: { line: '', type: 'empty' },
+        right: { line: line.substring(1), type: 'addition' }
+      });
+      lineIdx++;
+    } else {
+      // Normal line
+      const cleanLine = line.startsWith(' ') ? line.substring(1) : line;
+      rows.push({
+        id: lineIdx,
+        left: { line: cleanLine, type: 'normal' },
+        right: { line: cleanLine, type: 'normal' }
+      });
+      lineIdx++;
+    }
+  }
+  return rows;
+}
+
+function UnifiedDiffViewer({ diffContent }: { diffContent: string }) {
+  const parsed = parseUnifiedDiff(diffContent);
+  return (
+    <div className="font-mono text-xs divide-y divide-gray-100 dark:divide-gray-800 bg-gray-50 dark:bg-gray-900 rounded-lg p-3 overflow-x-auto max-h-[500px]">
+      {parsed.map((row) => {
+        let rowClass = "text-gray-700 dark:text-gray-300 px-2 py-0.5";
+        if (row.type === 'addition') {
+          rowClass = "bg-green-50 text-green-700 dark:bg-green-950/30 dark:text-green-400 px-2 py-0.5";
+        } else if (row.type === 'deletion') {
+          rowClass = "bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400 px-2 py-0.5";
+        } else if (row.type === 'info') {
+          rowClass = "bg-blue-50/50 text-blue-600 dark:bg-blue-950/20 dark:text-blue-400 font-semibold px-2 py-1 border-y border-blue-100 dark:border-blue-900/30";
+        }
+        return (
+          <div key={row.id} className={rowClass}>
+            {row.line}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function SideBySideDiffViewer({ diffContent }: { diffContent: string }) {
+  const rows = parseSideBySideDiff(diffContent);
+  return (
+    <div className="font-mono text-xs divide-y divide-gray-100 dark:divide-gray-800 bg-gray-50 dark:bg-gray-900 rounded-lg overflow-x-auto max-h-[500px] border border-gray-200 dark:border-gray-700">
+      <div className="grid grid-cols-2 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 font-semibold px-4 py-2 text-gray-600 dark:text-gray-300 text-center">
+        <div>Previous Content</div>
+        <div className="border-l border-gray-200 dark:border-gray-700">Current Content</div>
+      </div>
+      {rows.map((row) => {
+        let leftClass = "px-3 py-1 truncate";
+        let rightClass = "px-3 py-1 truncate border-l border-gray-200 dark:border-gray-700";
+
+        if (row.left.type === 'deletion') {
+          leftClass += " bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400";
+        } else if (row.left.type === 'empty') {
+          leftClass += " bg-gray-100/50 dark:bg-gray-800/20 text-transparent select-none";
+        }
+
+        if (row.right.type === 'addition') {
+          rightClass += " bg-green-50 text-green-700 dark:bg-green-950/30 dark:text-green-400";
+        } else if (row.right.type === 'empty') {
+          rightClass += " bg-gray-100/50 dark:bg-gray-800/20 text-transparent select-none";
+        }
+
+        return (
+          <div key={row.id} className="grid grid-cols-2">
+            <div className={leftClass}>{row.left.line || ' '}</div>
+            <div className={rightClass}>{row.right.line || ' '}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function JsonDiffViewer({ selectedDiff }: { selectedDiff: any }) {
+  const jsonStr = JSON.stringify(selectedDiff, null, 2);
+  return (
+    <div className="font-mono text-xs bg-gray-50 dark:bg-gray-900 rounded-lg p-4 overflow-x-auto max-h-[500px] text-gray-700 dark:text-gray-300">
+      <pre>{jsonStr}</pre>
+    </div>
+  );
+}
+
 export default function DiffsPage() {
   const { data: diffsData, isLoading } = useDiffs();
   const diffs = diffsData?.items ?? [];
@@ -25,7 +168,7 @@ export default function DiffsPage() {
   return (
     <div className="space-y-4">
       {/* View Mode Tabs */}
-      <div className="flex items-center gap-1 rounded-lg border border-gray-200 p-1 dark:border-gray-700">
+      <div className="flex items-center gap-1 rounded-lg border border-gray-200 p-1 dark:border-gray-700 bg-white dark:bg-gray-800">
         {(['unified', 'side-by-side', 'json'] as const).map((mode) => (
           <button
             key={mode}
@@ -62,7 +205,9 @@ export default function DiffsPage() {
                 {diffs.map((diff) => (
                   <button
                     key={diff.id}
-                    onClick={() => setSelectedDiffId(diff.id)}
+                    onClick={() => {
+                      setSelectedDiffId(diff.id);
+                    }}
                     className={`w-full px-4 py-3 text-left transition-colors ${
                       selectedDiffId === diff.id
                         ? 'bg-brand-50 dark:bg-brand-900/20'
@@ -71,12 +216,12 @@ export default function DiffsPage() {
                   >
                     <div className="flex items-center justify-between">
                       <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
-                        Diff #{diff.id}
+                        Diff #{diff.id.substring(0, 8)}
                       </p>
                       <span className="text-xs text-gray-400">{formatRelative(diff.createdAt)}</span>
                     </div>
                     <p className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">
-                      {diff.diffType} • URL: {diff.urlId}
+                      {diff.diffType} • URL: {diff.urlId.substring(0, 8)}
                     </p>
                     {diff.summary && (
                       <p className="mt-1 truncate text-xs text-gray-400 dark:text-gray-500">{diff.summary}</p>
@@ -103,21 +248,17 @@ export default function DiffsPage() {
                   </div>
                 )}
 
-                {/* Diff Content */}
-                <div className="rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                  <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700">
-                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-                      {selectedDiff.diffType === 'json' ? 'JSON Diff' : selectedDiff.diffType === 'html' ? 'HTML Diff' : 'Text Diff'}
-                    </h3>
-                    <span className="text-xs text-gray-400">
-                      {formatRelative(selectedDiff.createdAt)}
-                    </span>
-                  </div>
-                  <div className="overflow-x-auto p-4">
-                    <pre className="whitespace-pre-wrap text-xs font-mono text-gray-700 dark:text-gray-300">
-                      {selectedDiff.diffContent || '(No diff content)'}
-                    </pre>
-                  </div>
+                {/* Diff Content Tab Routing */}
+                <div className="rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800 p-4">
+                  {viewMode === 'unified' && (
+                    <UnifiedDiffViewer diffContent={selectedDiff.diffContent} />
+                  )}
+                  {viewMode === 'side-by-side' && (
+                    <SideBySideDiffViewer diffContent={selectedDiff.diffContent} />
+                  )}
+                  {viewMode === 'json' && (
+                    <JsonDiffViewer selectedDiff={selectedDiff} />
+                  )}
                 </div>
 
                 {/* Checksums */}

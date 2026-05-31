@@ -1,12 +1,15 @@
-import { usePlatformStats } from '../hooks/useAuth';
+import { usePlatformStats, useChecks } from '../hooks/useAuth';
 import { UrlStatusCard } from '../components/urls/UrlStatusCard';
-import { getStatusDot } from '../lib/utils';
+import { getStatusDot, formatRelative } from '../lib/utils';
 import { ROUTES } from '../lib/constants';
 import { Link } from 'react-router-dom';
 import { Globe, Activity, GitCompare, TrendingUp, AlertCircle, Eye, Clock, ArrowUpRight } from 'lucide-react';
 
 export default function DashboardPage() {
-  const { data: stats, isLoading } = usePlatformStats();
+  const { data: stats, isLoading: statsLoading } = usePlatformStats();
+  const { data: checksData, isLoading: checksLoading } = useChecks({ pageSize: 5 });
+
+  const isLoading = statsLoading || checksLoading;
 
   if (isLoading) {
     return (
@@ -50,13 +53,14 @@ export default function DashboardPage() {
     },
   ];
 
-  const recentChecks = [
-    { id: '1', url: 'openai.com/policies/terms-of-use', status: 'COMPLETED', changed: true, time: '2m ago' },
-    { id: '2', url: 'anthropic.com/legal/consumer-terms', status: 'COMPLETED', changed: false, time: '5m ago' },
-    { id: '3', url: 'policies.google.com/terms', status: 'FAILED', changed: false, time: '10m ago' },
-    { id: '4', url: 'openai.com/policies/privacy-policy', status: 'COMPLETED', changed: true, time: '15m ago' },
-    { id: '5', url: 'ai.google.dev/gemini-api/terms', status: 'COMPLETED', changed: false, time: '20m ago' },
-  ];
+  const checks = checksData?.items ?? [];
+  const recentChecks = checks.map((c: any) => ({
+    id: c.id,
+    url: c.urlName || c.pageTitle || 'Check #' + c.id.substring(0, 8),
+    status: c.status.toUpperCase(),
+    changed: c.status.toLowerCase() === 'changed',
+    time: formatRelative(c.completedAt || c.createdAt),
+  }));
 
   return (
     <div className="space-y-6">
@@ -98,29 +102,35 @@ export default function DashboardPage() {
           </Link>
         </div>
         <div className="divide-y divide-gray-100 dark:divide-gray-700">
-          {recentChecks.map((check) => (
-            <div key={check.id} className="flex items-center justify-between px-6 py-3">
-              <div className="flex items-center gap-3">
-                <span className={`inline-block h-2 w-2 rounded-full ${getStatusDot(check.status)}`} />
-                <span className="text-sm font-medium text-gray-900 dark:text-white truncate max-w-xs">
-                  {check.url}
-                </span>
-              </div>
-              <div className="flex items-center gap-4">
-                {check.changed && (
-                  <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                    <TrendingUp size={12} /> Changed
-                  </span>
-                )}
-                {check.status === 'FAILED' && (
-                  <span className="inline-flex items-center gap-1 text-xs font-medium text-red-600 dark:text-red-400">
-                    <AlertCircle size={12} /> Failed
-                  </span>
-                )}
-                <span className="text-xs text-gray-400">{check.time}</span>
-              </div>
+          {recentChecks.length === 0 ? (
+            <div className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+              No checks performed yet. Diffs and check results will appear here as URLs are monitored.
             </div>
-          ))}
+          ) : (
+            recentChecks.map((check) => (
+              <div key={check.id} className="flex items-center justify-between px-6 py-3">
+                <div className="flex items-center gap-3">
+                  <span className={`inline-block h-2 w-2 rounded-full ${getStatusDot(check.status)}`} />
+                  <span className="text-sm font-medium text-gray-900 dark:text-white truncate max-w-xs">
+                    {check.url}
+                  </span>
+                </div>
+                <div className="flex items-center gap-4">
+                  {check.changed && (
+                    <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                      <TrendingUp size={12} /> Changed
+                    </span>
+                  )}
+                  {check.status === 'FAILED' && (
+                    <span className="inline-flex items-center gap-1 text-xs font-medium text-red-600 dark:text-red-400">
+                      <AlertCircle size={12} /> Failed
+                    </span>
+                  )}
+                  <span className="text-xs text-gray-400">{check.time}</span>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
@@ -130,9 +140,6 @@ export default function DashboardPage() {
         <div className="flex flex-wrap gap-3">
           <Link to={ROUTES.urls} className="btn-primary">
             <Globe size={16} /> Add New URL
-          </Link>
-          <Link to={`${ROUTES.urls}?tab=firecrawl`} className="btn-secondary">
-            Browse Firecrawl Monitors
           </Link>
           <Link to={ROUTES.settings} className="btn-secondary">
             Configure Notifications

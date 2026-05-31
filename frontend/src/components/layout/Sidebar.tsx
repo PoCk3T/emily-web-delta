@@ -5,7 +5,6 @@ import {
   Activity,
   GitCompare,
   BarChart3,
-  Bell,
   Settings,
   Shield,
   Moon,
@@ -29,7 +28,6 @@ const navItems: NavItem[] = [
   { name: 'Checks', href: ROUTES.checks, icon: Activity },
   { name: 'Diffs', href: ROUTES.diffs, icon: GitCompare },
   { name: 'Analytics', href: ROUTES.analytics, icon: BarChart3 },
-  { name: 'Notifications', href: ROUTES.settings, icon: Bell },
   { name: 'Settings', href: ROUTES.settings, icon: Settings },
   { name: 'Admin', href: ROUTES.admin, icon: Shield, adminOnly: true },
 ];
