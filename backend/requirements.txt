@@ -31,6 +31,7 @@ redis>=5.0.1
 readability-lxml>=0.8.1,<0.9
 trafilatura>=1.10.0
 lxml>=5.1.0
+cloakbrowser>=0.3.31
 
 # Utilities
 python-dotenv>=1.0.0

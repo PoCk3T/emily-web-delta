@@ -23,12 +23,20 @@ class Settings(BaseSettings):
     FIRECRAWL_BASE_URL: str = "https://api.firecrawl.dev"
 
     # CloakBrowser
-    CLOAKBROWSER_PATH: str = "/home/emily/.cloakbrowser/chromium-146.0.7680.177.4/chrome"
+    CLOAKBROWSER_PATH: str = (
+        "/home/emily/.cloakbrowser/chromium-146.0.7680.177.4/chrome"
+    )
 
     # Application
     APP_NAME: str = "Emily Web Delta"
     DEBUG: bool = False
-    CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:80"]
+    CORS_ORIGINS: list[str] = [
+        "http://localhost:3000",
+        "http://localhost:80",
+        "http://localhost",
+        "http://127.0.0.1",
+        "http://127.0.0.1:80",
+    ]
 
     # Email (SMTP)
     SMTP_HOST: str = ""

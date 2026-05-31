@@ -24,9 +24,7 @@ class Snapshot(Base):
         nullable=False,
         index=True,
     )
-    content_hash: Mapped[str] = mapped_column(
-        String(64), nullable=False, index=True
-    )
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -47,3 +45,5 @@ class Snapshot(Base):
 
 # Forward references
 from app.models.url import Url  # noqa: E402
+
+UrlSnapshot = Snapshot

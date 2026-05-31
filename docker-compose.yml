@@ -18,6 +18,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
+    volumes:
+      - ./backend:/app
     environment:
       - DATABASE_URL=postgresql+asyncpg://emily:emily@db:5432/emily
       - REDIS_URL=redis://redis:6379/0
@@ -41,6 +43,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    volumes:
+      - ./backend:/app
     environment:
       - DATABASE_URL=postgresql+asyncpg://emily:emily@db:5432/emily
       - REDIS_URL=redis://redis:6379/0
@@ -50,6 +54,8 @@ services:
       redis:
         condition: service_started
     command: celery -A app.celery_app worker --concurrency=4 --loglevel=info
+    healthcheck:
+      disable: true
     restart: unless-stopped
 
   # ─── Celery Beat (scheduler) ───
@@ -57,6 +63,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    volumes:
+      - ./backend:/app
     environment:
       - DATABASE_URL=postgresql+asyncpg://emily:emily@db:5432/emily
       - REDIS_URL=redis://redis:6379/0
@@ -66,6 +74,8 @@ services:
       redis:
         condition: service_started
     command: celery -A app.celery_app beat --loglevel=info
+    healthcheck:
+      disable: true
     restart: unless-stopped
 
   # ─── Frontend (Nginx serves static React build) ───

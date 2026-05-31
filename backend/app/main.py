@@ -31,7 +31,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager for startup/shutdown events."""
     logger.info(f"Starting {settings.APP_NAME}")
     logger.info(f"Debug mode: {settings.DEBUG}")
-    logger.info(f"Database URL: {'***' if 'password' in settings.DATABASE_URL else settings.DATABASE_URL}")
+    logger.info(
+        f"Database URL: {'***' if 'password' in settings.DATABASE_URL else settings.DATABASE_URL}"
+    )
     yield
     logger.info(f"Shutting down {settings.APP_NAME}")
 
@@ -56,12 +58,12 @@ app.add_middleware(
 
 # Include routers
 app.include_router(auth_router, prefix="/api/v1", tags=["auth"])
+app.include_router(analytics_router, prefix="/api/v1", tags=["analytics"])
 app.include_router(urls_router, prefix="/api/v1", tags=["urls"])
 app.include_router(checks_router, prefix="/api/v1", tags=["checks"])
 app.include_router(diffs_router, prefix="/api/v1", tags=["diffs"])
 app.include_router(notifications_router, prefix="/api/v1", tags=["notifications"])
 app.include_router(admin_router, prefix="/api/v1", tags=["admin"])
-app.include_router(analytics_router, prefix="/api/v1", tags=["analytics"])
 app.include_router(webhooks_router, prefix="/api/v1", tags=["webhooks"])
 app.include_router(health_router, prefix="/api/v1", tags=["health"])
 

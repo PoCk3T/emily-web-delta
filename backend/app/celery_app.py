@@ -9,6 +9,11 @@ celery_app = Celery(
     "emily",
     broker=REDIS_URL,
     backend=REDIS_URL,
+    include=[
+        "app.workers.polling",
+        "app.workers.notifications",
+        "app.workers.diff_processing",
+    ],
 )
 
 celery_app.conf.update(
