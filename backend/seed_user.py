@@ -1,4 +1,5 @@
 """Seed a first admin user and default monitoring URLs."""
+
 import asyncio
 import sys
 import uuid
@@ -19,16 +20,38 @@ from app.models.user import User
 # Default URLs to monitor — Terms of Service & Privacy Policies
 DEFAULT_URLS = [
     # OpenAI
-    {"name": "OpenAI Terms of Use", "url": "https://openai.com/terms", "tags": ["openai", "tos"]},
-    {"name": "OpenAI Privacy Policy", "url": "https://openai.com/policies/privacy-policy/", "tags": ["openai", "privacy"]},
-
+    {
+        "name": "OpenAI Terms of Use",
+        "url": "https://openai.com/terms",
+        "tags": ["openai", "tos"],
+    },
+    {
+        "name": "OpenAI Privacy Policy",
+        "url": "https://openai.com/policies/privacy-policy/",
+        "tags": ["openai", "privacy"],
+    },
     # Google / Gemini
-    {"name": "Google Terms of Service", "url": "https://policies.google.com/terms", "tags": ["google", "gemini", "tos"]},
-    {"name": "Google Privacy Policy", "url": "https://policies.google.com/privacy", "tags": ["google", "gemini", "privacy"]},
-
+    {
+        "name": "Google Terms of Service",
+        "url": "https://policies.google.com/terms",
+        "tags": ["google", "gemini", "tos"],
+    },
+    {
+        "name": "Google Privacy Policy",
+        "url": "https://policies.google.com/privacy",
+        "tags": ["google", "gemini", "privacy"],
+    },
     # Anthropic
-    {"name": "Anthropic Terms of Service", "url": "https://www.anthropic.com/legal/consumer-terms", "tags": ["anthropic", "tos"]},
-    {"name": "Anthropic Privacy Policy", "url": "https://www.anthropic.com/legal/privacy", "tags": ["anthropic", "privacy"]},
+    {
+        "name": "Anthropic Terms of Service",
+        "url": "https://www.anthropic.com/legal/consumer-terms",
+        "tags": ["anthropic", "tos"],
+    },
+    {
+        "name": "Anthropic Privacy Policy",
+        "url": "https://www.anthropic.com/legal/privacy",
+        "tags": ["anthropic", "privacy"],
+    },
 ]
 
 
@@ -77,7 +100,9 @@ async def seed_user():
         if not tenant:
             print("No tenant found — skipping URL seeding")
         else:
-            existing_urls = await db.execute(select(Url).where(Url.tenant_id == tenant.id))
+            existing_urls = await db.execute(
+                select(Url).where(Url.tenant_id == tenant.id)
+            )
             existing_url_set = {u.url for u in existing_urls.scalars().all()}
 
             for entry in DEFAULT_URLS:
@@ -89,7 +114,7 @@ async def seed_user():
                     tenant_id=tenant.id,
                     name=entry["name"],
                     url=entry["url"],
-                    backend="firecrawl",
+                    backend="selfhosted",
                     interval_seconds=3600,
                     enabled=True,
                     tags=entry["tags"],
@@ -99,9 +124,13 @@ async def seed_user():
 
             if created_count:
                 await db.commit()
-                print(f"\nSeeded {created_count} default URLs ({skipped_count} already existed)")
+                print(
+                    f"\nSeeded {created_count} default URLs ({skipped_count} already existed)"
+                )
             else:
-                print(f"\nAll {len(DEFAULT_URLS)} default URLs already exist ({skipped_count} skipped)")
+                print(
+                    f"\nAll {len(DEFAULT_URLS)} default URLs already exist ({skipped_count} skipped)"
+                )
 
 
 if __name__ == "__main__":

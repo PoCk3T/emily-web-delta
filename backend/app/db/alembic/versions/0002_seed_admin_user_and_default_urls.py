@@ -63,8 +63,10 @@ DEFAULT_URLS = [
 def _hash_password(password: str) -> str:
     """Hash a password using the app's existing hash_password function."""
     import sys
+
     sys.path.insert(0, "/app")
     from app.core.security import hash_password
+
     return hash_password(password)
 
 
@@ -154,9 +156,13 @@ def upgrade() -> None:
         sa.column("updated_at", sa.DateTime(timezone=True)),
     )
 
-    existing_urls = conn.execute(
-        sa.select(url_table.c.url).where(url_table.c.tenant_id == tenant_id)
-    ).scalars().all()
+    existing_urls = (
+        conn.execute(
+            sa.select(url_table.c.url).where(url_table.c.tenant_id == tenant_id)
+        )
+        .scalars()
+        .all()
+    )
     existing_url_set = set(existing_urls)
 
     inserted = 0
@@ -169,7 +175,7 @@ def upgrade() -> None:
                 tenant_id=tenant_id,
                 name=entry["name"],
                 url=entry["url"],
-                backend="firecrawl",
+                backend="selfhosted",
                 interval_seconds=3600,
                 enabled=True,
                 tags=entry["tags"],
@@ -198,9 +204,12 @@ def downgrade() -> None:
     conn.execute(
         url_table.delete().where(
             sa.and_(
-                url_table.c.tenant_id == sa.select(
+                url_table.c.tenant_id
+                == sa.select(
                     sa.table("tenants", sa.column("id", PG_UUID(as_uuid=True))).c.id
-                ).where(sa.table("tenants", sa.column("name", sa.String)).c.name == "Emily"),
+                ).where(
+                    sa.table("tenants", sa.column("name", sa.String)).c.name == "Emily"
+                ),
                 url_table.c.url.in_([u["url"] for u in DEFAULT_URLS]),
             )
         )
@@ -216,9 +225,12 @@ def downgrade() -> None:
         user_table.delete().where(
             sa.and_(
                 user_table.c.email == "admin@emily.dev",
-                user_table.c.tenant_id == sa.select(
+                user_table.c.tenant_id
+                == sa.select(
                     sa.table("tenants", sa.column("id", PG_UUID(as_uuid=True))).c.id
-                ).where(sa.table("tenants", sa.column("name", sa.String)).c.name == "Emily"),
+                ).where(
+                    sa.table("tenants", sa.column("name", sa.String)).c.name == "Emily"
+                ),
             )
         )
     )
@@ -229,8 +241,6 @@ def downgrade() -> None:
         sa.column("id", PG_UUID(as_uuid=True)),
         sa.column("name", sa.String),
     )
-    conn.execute(
-        tenant_table.delete().where(tenant_table.c.name == "Emily")
-    )
+    conn.execute(tenant_table.delete().where(tenant_table.c.name == "Emily"))
 
     print("Downgraded: removed seeded admin user and default URLs")
