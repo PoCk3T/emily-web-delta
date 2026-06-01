@@ -16,6 +16,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
     ports:
       - "8000:8000"
     volumes:
@@ -53,7 +54,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-    command: celery -A app.celery_app worker --concurrency=4 --loglevel=info
+    command: celery -A app.celery_app worker --concurrency=1 --loglevel=info
     healthcheck:
       disable: true
     restart: unless-stopped
@@ -73,7 +74,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-    command: celery -A app.celery_app beat --loglevel=info
+    command: celery -A app.celery_app beat --schedule=/tmp/celerybeat-schedule --loglevel=info
     healthcheck:
       disable: true
     restart: unless-stopped
@@ -83,12 +84,12 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        - VITE_API_BASE_URL=/api/v1
     ports:
       - "80:80"
     depends_on:
       - api
-    environment:
-      - VITE_API_URL=http://localhost:8000/api/v1
 
   # ─── Database (PostgreSQL 16) ───
   db:
