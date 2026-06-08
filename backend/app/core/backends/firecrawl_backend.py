@@ -3,8 +3,7 @@
 import hashlib
 import logging
 import time
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from app.core.extraction_backend import (
     ExtractionBackend,
@@ -26,10 +25,10 @@ class FirecrawlBackend(ExtractionBackend):
         self,
         url: str,
         mode: ExtractionMode = ExtractionMode.MARKDOWN,
-        schema: Optional[dict] = None,
-        goal: Optional[str] = None,
-        headers: Optional[dict] = None,
-        cookies: Optional[dict] = None,
+        schema: dict | None = None,
+        goal: str | None = None,
+        headers: dict | None = None,
+        cookies: dict | None = None,
     ) -> ExtractionResult:
         """Extract content from a URL using Firecrawl Scrape API."""
         start_time = time.time()
@@ -49,7 +48,7 @@ class FirecrawlBackend(ExtractionBackend):
                 content_hash="",
                 error=str(e),
                 metadata={
-                    "timestamp": datetime.now(timezone.utc),
+                    "timestamp": datetime.now(UTC),
                     "status_code": 500,
                 },
             )
@@ -71,7 +70,7 @@ class FirecrawlBackend(ExtractionBackend):
                 "title": scrape_data.get("metadata", {}).get("title", "Unknown Title"),
                 "status_code": 200,
                 "load_time_ms": round(load_time, 2),
-                "timestamp": datetime.now(timezone.utc),
+                "timestamp": datetime.now(UTC),
             },
         )
 

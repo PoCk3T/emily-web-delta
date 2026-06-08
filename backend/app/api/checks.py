@@ -1,6 +1,5 @@
 """Check results API routes."""
 
-
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,15 +14,15 @@ router = APIRouter()
 async def list_global_checks(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
-    urlId: Optional[str] = None,
+    url_id: str | None = Query(None, alias="urlId"),
     db: AsyncSession = Depends(get_session),
 ):
     """List all global check results with camelCase key responses for the frontend."""
     from uuid import UUID
 
     query = select(CheckResult)
-    if urlId:
-        query = query.where(CheckResult.url_id == UUID(urlId))
+    if url_id:
+        query = query.where(CheckResult.url_id == UUID(url_id))
 
     query = query.order_by(CheckResult.created_at.desc())
 

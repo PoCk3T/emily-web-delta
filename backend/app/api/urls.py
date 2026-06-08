@@ -306,7 +306,7 @@ async def check_now(url_id: UUID, db: AsyncSession = Depends(get_session)):
         from app.workers.polling import poll_urls
 
         poll_urls.delay([str(url.id)])
-    except Exception as e:
+    except Exception:
         # Fallback if celery is not running (e.g. in test env)
         pass
 

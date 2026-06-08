@@ -4,8 +4,7 @@ import hashlib
 import logging
 import re
 import time
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 import httpx
 
@@ -29,10 +28,10 @@ class SelfHostedBackend(ExtractionBackend):
         self,
         url: str,
         mode: ExtractionMode = ExtractionMode.MARKDOWN,
-        schema: Optional[dict] = None,
-        goal: Optional[str] = None,
-        headers: Optional[dict] = None,
-        cookies: Optional[dict] = None,
+        schema: dict | None = None,
+        goal: str | None = None,
+        headers: dict | None = None,
+        cookies: dict | None = None,
     ) -> ExtractionResult:
         """Extract content from a URL, trying CloakBrowser first and falling back to httpx."""
         start_time = time.time()
@@ -93,7 +92,6 @@ class SelfHostedBackend(ExtractionBackend):
                     )
                     response.raise_for_status()
                     html = response.text
-                    status_code = response.status_code
 
                     # Simple title extraction from raw HTML
                     title_match = re.search(
@@ -112,7 +110,7 @@ class SelfHostedBackend(ExtractionBackend):
                     content_hash="",
                     error=f"CloakBrowser error: {cloak_err} | HTTPX error: {e}",
                     metadata={
-                        "timestamp": datetime.now(timezone.utc),
+                        "timestamp": datetime.now(UTC),
                         "status_code": getattr(
                             getattr(e, "response", None), "status_code", 500
                         ),
@@ -142,7 +140,7 @@ class SelfHostedBackend(ExtractionBackend):
                 "engine": engine_used,
                 "load_time_ms": round(load_time, 2),
                 "content_length": len(extracted),
-                "timestamp": datetime.now(timezone.utc),
+                "timestamp": datetime.now(UTC),
             },
         )
 

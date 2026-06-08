@@ -2,20 +2,19 @@
 
 import asyncio
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, or_, and_
+from sqlalchemy import and_, or_, select
 
 from app.celery_app import celery_app
+from app.core.backends.selfhosted_backend import SelfHostedBackend
+from app.core.diff_engine import compute_diff
 from app.db.session import async_session_factory
-from app.models.url import Url, UrlState
-from app.models.snapshot import Snapshot
 from app.models.check_result import CheckResult
 from app.models.diff import Diff
 from app.models.notification import NotificationRule
-from app.core.backends.selfhosted_backend import SelfHostedBackend
-from app.core.diff_engine import compute_diff
+from app.models.snapshot import Snapshot
+from app.models.url import Url, UrlState
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +33,7 @@ async def async_poll_single_url(db, url: Url) -> CheckResult:
         cookies=url.cookies,
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     interval = timedelta(seconds=url.interval_seconds)
 
     # 3. Handle extraction failure/error
@@ -169,7 +168,6 @@ async def async_poll_single_url(db, url: Url) -> CheckResult:
         logger.info(f"No changes detected for {url.url}")
 
     # Transition url state to active / recovered
-    previous_state = url.state
     url.failure_consecutive_count = 0
     url.state = UrlState.ACTIVE
     url.last_checked = now
@@ -184,7 +182,7 @@ async def async_poll_single_url(db, url: Url) -> CheckResult:
         diff_text=diff_text,
         diff_size=diff_size,
         content_hash=result.content_hash,
-        is_meaningful=True if status == "changed" else False,
+        is_meaningful=status == "changed",
         status_code=result.metadata.get("status_code", 200),
         is_failure=False,
         failure_consecutive_count=0,
@@ -200,12 +198,12 @@ async def async_poll_single_url(db, url: Url) -> CheckResult:
 async def trigger_notifications_for_url(db, url: Url, message: str):
     """Check notification rules and dispatch alerts."""
     stmt = select(NotificationRule).where(
-        NotificationRule.enabled == True,
+        NotificationRule.enabled,
         or_(
             NotificationRule.url_id == url.id,
             and_(
                 NotificationRule.tenant_id == url.tenant_id,
-                NotificationRule.url_id == None,
+                NotificationRule.url_id is None,
             ),
         ),
     )
@@ -225,11 +223,11 @@ async def trigger_notifications_for_url(db, url: Url, message: str):
         logger.info(
             f"Dispatching notification via rule {rule.id} ({rule.type} -> {rule.channel})"
         )
-        rule.last_sent_at = datetime.now(timezone.utc)
+        rule.last_sent_at = datetime.now(UTC)
         db.add(rule)
 
 
-async def async_poll_urls(url_ids: Optional[list[str]] = None) -> dict:
+async def async_poll_urls(url_ids: list[str] | None = None) -> dict:
     """Helper to poll URLs asynchronously."""
     from app.db.session import close_db
 
@@ -244,14 +242,14 @@ async def async_poll_urls(url_ids: Optional[list[str]] = None) -> dict:
                 stmt = select(Url).where(Url.id.in_(uuids))
             else:
                 # Check all enabled self-hosted URLs that are due
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 logger.info(
                     "Scheduler poll triggered. Checking due self-hosted URLs..."
                 )
                 stmt = select(Url).where(
-                    Url.enabled == True,
+                    Url.enabled,
                     Url.backend == "selfhosted",
-                    or_(Url.next_check == None, Url.next_check <= now),
+                    or_(Url.next_check is None, Url.next_check <= now),
                 )
 
             res = await db.execute(stmt)
@@ -291,7 +289,7 @@ async def async_poll_urls(url_ids: Optional[list[str]] = None) -> dict:
 
 
 @celery_app.task(bind=True, max_retries=3)
-def poll_urls(self, url_ids: Optional[list[str]] = None):
+def poll_urls(self, url_ids: list[str] | None = None):
     """Poll a batch of URLs (sync celery wrapper around async implementation)."""
     logger.info("Celery task poll_urls started.")
     try:
