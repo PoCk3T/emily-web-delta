@@ -1,6 +1,5 @@
 """Check results API routes."""
 
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
@@ -72,7 +71,7 @@ async def list_checks(
     url_id: str,
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
-    status: Optional[str] = None,
+    status: str | None = None,
     db: AsyncSession = Depends(get_session),
 ):
     """List check results for a URL."""
@@ -151,8 +150,9 @@ async def get_check_diff(
     url_id: str, check_id: str, db: AsyncSession = Depends(get_session)
 ):
     """Get rendered diff for a check."""
-    from fastapi import HTTPException
     from uuid import UUID
+
+    from fastapi import HTTPException
 
     result = await db.execute(
         select(CheckResult).where(

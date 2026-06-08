@@ -1,16 +1,14 @@
 """URL model for monitored web pages."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from typing import Any, List, Optional, Union
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
-    Enum as SAEnum,
     ForeignKey,
     Integer,
-    JSON,
     String,
     Text,
 )
@@ -67,7 +65,7 @@ class Url(Base):
     js_required: Mapped[bool] = mapped_column(Boolean, default=False)
     max_retries: Mapped[int] = mapped_column(Integer, default=3)
     user_agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    tags: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
+    tags: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     firecrawl_config: Mapped[dict | None] = mapped_column(
         JSON, nullable=True
     )
@@ -76,28 +74,28 @@ class Url(Base):
         Integer, default=0
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     # Relationships
     tenant: Mapped["Tenant"] = relationship(
         "Tenant", back_populates="urls", lazy="selectin"
     )
-    snapshots: Mapped[List["Snapshot"]] = relationship(
+    snapshots: Mapped[list["Snapshot"]] = relationship(
         "Snapshot", back_populates="url", lazy="select"
     )
-    diffs: Mapped[List["Diff"]] = relationship(
+    diffs: Mapped[list["Diff"]] = relationship(
         "Diff", back_populates="url", lazy="select"
     )
-    check_results: Mapped[List["CheckResult"]] = relationship(
+    check_results: Mapped[list["CheckResult"]] = relationship(
         "CheckResult", back_populates="url", lazy="select"
     )
-    firecrawl_monitors: Mapped[List["FirecrawlMonitor"]] = relationship(
+    firecrawl_monitors: Mapped[list["FirecrawlMonitor"]] = relationship(
         "FirecrawlMonitor", back_populates="url", lazy="select"
     )
 
@@ -111,9 +109,9 @@ class Url(Base):
 
 
 # Forward references
-from app.models.tenant import Tenant  # noqa: E402
-from app.models.snapshot import Snapshot  # noqa: E402
-from app.models.diff import Diff  # noqa: E402
+
 from app.models.check_result import CheckResult  # noqa: E402
+from app.models.diff import Diff  # noqa: E402
 from app.models.firecrawl_monitor import FirecrawlMonitor  # noqa: E402
-import sqlalchemy as sa  # noqa: E402
+from app.models.snapshot import Snapshot  # noqa: E402
+from app.models.tenant import Tenant  # noqa: E402

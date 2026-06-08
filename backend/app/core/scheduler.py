@@ -1,14 +1,11 @@
 """URL polling scheduler for self-hosted fallback."""
 
-import asyncio
 import hashlib
 import logging
-from typing import Optional
 
 from app.core.extraction_backend import ExtractionBackend, ExtractionMode
-from app.models.url import Url
-from app.models.snapshot import UrlSnapshot
 from app.models.check_result import CheckResult
+from app.models.url import Url
 
 logger = logging.getLogger(__name__)
 

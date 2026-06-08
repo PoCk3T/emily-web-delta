@@ -1,7 +1,6 @@
 """Firecrawl service layer."""
 
 import logging
-from typing import Optional
 
 import httpx
 
@@ -29,8 +28,8 @@ class FirecrawlService:
         self,
         name: str,
         url: str,
-        schedule: Optional[str] = None,
-        goal: Optional[str] = None,
+        schedule: str | None = None,
+        goal: str | None = None,
     ) -> dict:
         """Create a Firecrawl monitor."""
         payload = {

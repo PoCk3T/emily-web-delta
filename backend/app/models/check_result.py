@@ -1,14 +1,14 @@
 """Check result model for tracking URL check outcomes."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     ForeignKey,
     Integer,
-    JSON,
     String,
     Text,
 )
@@ -57,7 +57,7 @@ class CheckResult(Base):
         String(20), default="ACTIVE", nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
 
     # Relationships

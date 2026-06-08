@@ -1,6 +1,7 @@
 """Celery configuration for self-hosted polling."""
 
 import os
+
 from celery import Celery
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")

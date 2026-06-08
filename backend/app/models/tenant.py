@@ -1,12 +1,9 @@
 """Tenant model for multi-tenancy."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from typing import List
-
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, and_
-from sqlalchemy.orm import ColumnProperty, foreign
+from sqlalchemy import Boolean, DateTime, Integer, String
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -26,12 +23,12 @@ class Tenant(Base):
     max_urls: Mapped[int] = mapped_column(Integer, default=10)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -39,16 +36,16 @@ class Tenant(Base):
         "User", lazy="selectin",
         primaryjoin="foreign(users.c.tenant_id) == tenants.c.id",
     )
-    urls: Mapped[List["Url"]] = relationship(
+    urls: Mapped[list["Url"]] = relationship(
         "Url", back_populates="tenant", lazy="select"
     )
-    notification_rules: Mapped[List["NotificationRule"]] = relationship(
+    notification_rules: Mapped[list["NotificationRule"]] = relationship(
         "NotificationRule", back_populates="tenant", lazy="select"
     )
-    firecrawl_monitors: Mapped[List["FirecrawlMonitor"]] = relationship(
+    firecrawl_monitors: Mapped[list["FirecrawlMonitor"]] = relationship(
         "FirecrawlMonitor", back_populates="tenant", lazy="select"
     )
-    api_keys: Mapped[List["ApiKey"]] = relationship(
+    api_keys: Mapped[list["ApiKey"]] = relationship(
         "ApiKey", back_populates="tenant", lazy="select"
     )
 
@@ -57,8 +54,8 @@ class Tenant(Base):
 
 
 # Forward references
-from app.models.user import User  # noqa: E402
-from app.models.url import Url  # noqa: E402
-from app.models.notification import NotificationRule  # noqa: E402
-from app.models.firecrawl_monitor import FirecrawlMonitor  # noqa: E402
 from app.models.api_key import ApiKey  # noqa: E402
+from app.models.firecrawl_monitor import FirecrawlMonitor  # noqa: E402
+from app.models.notification import NotificationRule  # noqa: E402
+from app.models.url import Url  # noqa: E402
+from app.models.user import User  # noqa: E402

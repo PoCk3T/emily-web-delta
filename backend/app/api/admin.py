@@ -5,9 +5,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
+from app.models.check_result import CheckResult
 from app.models.url import Url
 from app.models.user import User
-from app.models.check_result import CheckResult
 
 router = APIRouter()
 

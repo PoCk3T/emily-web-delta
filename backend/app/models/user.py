@@ -1,11 +1,9 @@
 """User model."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from typing import List
-
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -34,22 +32,22 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     # Relationships
     tenant: Mapped["Tenant"] = relationship(
         "Tenant", back_populates="owner", uselist=False, lazy="selectin"
     )
-    api_keys: Mapped[List["ApiKey"]] = relationship(
+    api_keys: Mapped[list["ApiKey"]] = relationship(
         "ApiKey", back_populates="user", lazy="select"
     )
-    audit_logs: Mapped[List["AuditLog"]] = relationship(
+    audit_logs: Mapped[list["AuditLog"]] = relationship(
         "AuditLog", back_populates="user", lazy="select"
     )
 
@@ -58,6 +56,6 @@ class User(Base):
 
 
 # Forward reference for Tenant.owner
-from app.models.tenant import Tenant  # noqa: E402
 from app.models.api_key import ApiKey  # noqa: E402
 from app.models.audit_log import AuditLog  # noqa: E402
+from app.models.tenant import Tenant  # noqa: E402

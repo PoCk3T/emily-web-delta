@@ -1,7 +1,6 @@
 """Notification service layer."""
 
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -16,10 +15,9 @@ class NotificationService:
         self,
         rule_id: str,
         message: str,
-        context: Optional[dict] = None,
+        context: dict | None = None,
     ) -> bool:
         """Send a notification based on a rule."""
-        from app.models.notification import NotificationRule
 
         result = await self.db.execute(
             self._select_rule(rule_id)
@@ -52,7 +50,7 @@ class NotificationService:
         logger.info(f"Sending email to {rule.channel}: {message}")
         return True
 
-    async def _send_webhook(self, rule, message: str, context: Optional[dict]) -> bool:
+    async def _send_webhook(self, rule, message: str, context: dict | None) -> bool:
         """Send webhook notification."""
         # In production: use httpx to POST to webhook URL
         logger.info(f"Sending webhook to {rule.channel}")
@@ -76,6 +74,7 @@ class NotificationService:
     def _select_rule(self, rule_id: str):
         """Create a select statement for a notification rule."""
         from sqlalchemy import select
+
         from app.models.notification import NotificationRule
 
         return select(NotificationRule).where(NotificationRule.id == rule_id)

@@ -1,13 +1,12 @@
 """URL management API routes."""
 
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.url_validator import validate_url
 from app.db.session import get_session
@@ -22,28 +21,28 @@ class UrlCreateRequest(BaseModel):
     interval_seconds: int = Field(default=3600, ge=60, le=86400)
     enabled: bool = True
     backend: str = "firecrawl"
-    headers: Optional[dict] = None
-    cookies: Optional[dict] = None
+    headers: dict | None = None
+    cookies: dict | None = None
     js_required: bool = False
     max_retries: int = 3
-    user_agent: Optional[str] = None
-    goal: Optional[str] = None
+    user_agent: str | None = None
+    goal: str | None = None
     tags: list[str] = []
 
 
 class UrlUpdateRequest(BaseModel):
-    name: Optional[str] = None
-    url: Optional[str] = None
-    interval_seconds: Optional[int] = None
-    enabled: Optional[bool] = None
-    backend: Optional[str] = None
-    headers: Optional[dict] = None
-    cookies: Optional[dict] = None
-    js_required: Optional[bool] = None
-    max_retries: Optional[int] = None
-    user_agent: Optional[str] = None
-    goal: Optional[str] = None
-    tags: Optional[list[str]] = None
+    name: str | None = None
+    url: str | None = None
+    interval_seconds: int | None = None
+    enabled: bool | None = None
+    backend: str | None = None
+    headers: dict | None = None
+    cookies: dict | None = None
+    js_required: bool | None = None
+    max_retries: int | None = None
+    user_agent: str | None = None
+    goal: str | None = None
+    tags: list[str] | None = None
 
 
 class UrlResponse(BaseModel):
@@ -53,9 +52,9 @@ class UrlResponse(BaseModel):
     interval_seconds: int
     enabled: bool
     backend: str
-    last_checked: Optional[str] = None
-    last_hash: Optional[str] = None
-    next_check: Optional[str] = None
+    last_checked: str | None = None
+    last_hash: str | None = None
+    next_check: str | None = None
     tags: list[str]
     status: str = "active"
     created_at: str
@@ -116,9 +115,9 @@ async def create_url(
 async def list_urls(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
-    backend: Optional[str] = None,
-    enabled: Optional[bool] = None,
-    tag: Optional[str] = None,
+    backend: str | None = None,
+    enabled: bool | None = None,
+    tag: str | None = None,
     db: AsyncSession = Depends(get_session),
 ):
     """List all URLs with pagination and filtering."""

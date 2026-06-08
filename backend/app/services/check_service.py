@@ -1,7 +1,6 @@
 """Check service layer."""
 
 import logging
-from typing import Optional
 
 from app.core.extraction_backend import ExtractionBackend
 from app.models.check_result import CheckResult
@@ -16,7 +15,7 @@ class CheckService:
     def __init__(self, backend: ExtractionBackend):
         self.backend = backend
 
-    async def check_url(self, url: Url) -> Optional[CheckResult]:
+    async def check_url(self, url: Url) -> CheckResult | None:
         """Check a URL and return the result."""
         if not url.enabled:
             return None

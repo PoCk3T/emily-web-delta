@@ -9,7 +9,7 @@ Revises: 0001
 Create Date: 2026-05-29
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import sqlalchemy as sa
@@ -85,7 +85,7 @@ def upgrade() -> None:
         sa.column("updated_at", sa.DateTime(timezone=True)),
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     tenant_id = uuid4()
 
     tenant_row = conn.execute(

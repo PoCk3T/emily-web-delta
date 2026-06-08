@@ -1,9 +1,9 @@
 """Diff model for change detection results."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -51,7 +51,7 @@ class Diff(Base):
     lines_added: Mapped[int] = mapped_column(Integer, default=0)
     lines_removed: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
 
     # Relationships
@@ -70,5 +70,5 @@ class Diff(Base):
 
 
 # Forward references
-from app.models.url import Url  # noqa: E402
 from app.models.snapshot import Snapshot  # noqa: E402
+from app.models.url import Url  # noqa: E402

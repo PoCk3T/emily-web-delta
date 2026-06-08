@@ -1,7 +1,6 @@
 """Security utilities: password hashing, JWT tokens."""
 
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -23,10 +22,10 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def create_access_token(
     subject: str,
-    expires_delta: Optional[timedelta] = None,
+    expires_delta: timedelta | None = None,
 ) -> str:
     """Create a JWT access token."""
-    expire = datetime.now(timezone.utc) + (
+    expire = datetime.now(UTC) + (
         expires_delta
         or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
@@ -44,7 +43,7 @@ def create_access_token(
 
 def create_refresh_token(subject: str) -> str:
     """Create a JWT refresh token."""
-    expire = datetime.now(timezone.utc) + timedelta(
+    expire = datetime.now(UTC) + timedelta(
         days=settings.REFRESH_TOKEN_EXPIRE_DAYS
     )
     payload = {
@@ -59,7 +58,7 @@ def create_refresh_token(subject: str) -> str:
     )
 
 
-def decode_token(token: str) -> Optional[dict]:
+def decode_token(token: str) -> dict | None:
     """Decode and validate a JWT token."""
     try:
         payload = jwt.decode(

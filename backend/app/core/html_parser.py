@@ -1,8 +1,6 @@
 """HTML content extraction for self-hosted fallback."""
 
 import logging
-import re
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -10,7 +8,7 @@ logger = logging.getLogger(__name__)
 async def extract_content(
     html: str,
     extraction_method: str = "readability",
-    schema: Optional[dict] = None,
+    schema: dict | None = None,
 ) -> str:
     """Extract readable content from HTML."""
     if extraction_method == "readability":

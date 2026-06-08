@@ -1,7 +1,6 @@
 """Analytics service layer."""
 
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +18,7 @@ class AnalyticsService:
     ) -> dict:
         """Get analytics for a URL."""
         from sqlalchemy import func, select
+
         from app.models.check_result import CheckResult
 
         # Count total checks
@@ -79,6 +79,7 @@ class AnalyticsService:
     async def get_platform_analytics(self) -> dict:
         """Get platform-wide analytics."""
         from sqlalchemy import func, select
+
         from app.models.check_result import CheckResult
 
         result = await self.db.execute(select(func.count(CheckResult.id)))

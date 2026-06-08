@@ -1,12 +1,11 @@
 """URL service layer."""
 
 import logging
-from typing import Optional
 
 from app.core.extraction_backend import ExtractionBackend, ExtractionMode
 from app.core.scheduler import Scheduler
-from app.models.url import Url
 from app.models.check_result import CheckResult
+from app.models.url import Url
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +17,7 @@ class UrlService:
         self.backend = backend
         self.scheduler = Scheduler(backend)
 
-    async def check_url(self, url: Url) -> Optional[CheckResult]:
+    async def check_url(self, url: Url) -> CheckResult | None:
         """Check a URL and return the result."""
         if not url.enabled:
             logger.info(f"URL {url.url} is disabled, skipping")

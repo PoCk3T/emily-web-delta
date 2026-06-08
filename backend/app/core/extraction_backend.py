@@ -8,7 +8,6 @@ self-hosted polling.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
 
 
 class ExtractionMode(Enum):
@@ -28,12 +27,12 @@ class ExtractionResult:
     status: str  # "same", "changed", "new", "removed", "error"
     content: str
     content_hash: str
-    structured_data: Optional[dict] = None
-    diff_text: Optional[str] = None
-    diff_json: Optional[dict] = None
-    judgment: Optional[dict] = None
+    structured_data: dict | None = None
+    diff_text: str | None = None
+    diff_json: dict | None = None
+    judgment: dict | None = None
     metadata: dict = field(default_factory=dict)
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class ExtractionBackend(ABC):
@@ -44,10 +43,10 @@ class ExtractionBackend(ABC):
         self,
         url: str,
         mode: ExtractionMode = ExtractionMode.MARKDOWN,
-        schema: Optional[dict] = None,
-        goal: Optional[str] = None,
-        headers: Optional[dict] = None,
-        cookies: Optional[dict] = None,
+        schema: dict | None = None,
+        goal: str | None = None,
+        headers: dict | None = None,
+        cookies: dict | None = None,
     ) -> ExtractionResult:
         """Extract content from a URL."""
         ...

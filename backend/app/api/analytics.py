@@ -1,6 +1,5 @@
 """Analytics API routes."""
 
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select

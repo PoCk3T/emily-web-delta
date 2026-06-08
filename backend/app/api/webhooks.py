@@ -1,8 +1,7 @@
 """Firecrawl webhook handler."""
 
-from typing import Optional
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request
 
 router = APIRouter()
 

@@ -1,6 +1,5 @@
 """Notification rules API routes."""
 
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -18,13 +17,13 @@ class NotificationRuleCreate(BaseModel):
     type: str  # email, webhook, slack, telegram, discord
     channel: str  # email address, webhook URL, etc.
     enabled: bool = True
-    config: Optional[dict] = None
+    config: dict | None = None
 
 
 class NotificationRuleUpdate(BaseModel):
-    enabled: Optional[bool] = None
-    channel: Optional[str] = None
-    config: Optional[dict] = None
+    enabled: bool | None = None
+    channel: str | None = None
+    config: dict | None = None
 
 
 @router.post("/notifications/rules", status_code=status.HTTP_201_CREATED)
@@ -54,7 +53,7 @@ async def create_rule(request: NotificationRuleCreate, db: AsyncSession = Depend
 
 @router.get("/notifications/rules")
 async def list_rules(
-    url_id: Optional[str] = None,
+    url_id: str | None = None,
     db: AsyncSession = Depends(get_session),
 ):
     """List notification rules."""

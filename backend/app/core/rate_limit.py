@@ -1,9 +1,9 @@
 """Rate limiting using Redis sliding window."""
 
 from collections import defaultdict
+from collections.abc import Callable
 from functools import wraps
 from time import time
-from typing import Callable
 
 from fastapi import HTTPException, Request, status
 

@@ -1,7 +1,6 @@
 """Diff service layer."""
 
 import logging
-from typing import Optional
 
 from app.core.diff_engine import compute_diff
 from app.models.diff import Diff
@@ -22,7 +21,7 @@ class DiffService:
         from_snapshot_id: str,
         to_snapshot_id: str,
         diff_type: str = "unified",
-    ) -> Optional[Diff]:
+    ) -> Diff | None:
         """Compute diff between two snapshots and store it."""
         from sqlalchemy import select
 

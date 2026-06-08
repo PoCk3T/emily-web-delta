@@ -103,8 +103,9 @@ async def list_diffs(
 @router.get("/urls/{url_id}/diffs/{diff_id}")
 async def get_diff(url_id: str, diff_id: str, db: AsyncSession = Depends(get_session)):
     """Get a specific diff."""
-    from fastapi import HTTPException
     from uuid import UUID
+
+    from fastapi import HTTPException
 
     result = await db.execute(
         select(Diff).where(
@@ -133,8 +134,9 @@ async def get_diff_rendered(
     url_id: str, diff_id: str, db: AsyncSession = Depends(get_session)
 ):
     """Get rendered HTML diff."""
-    from fastapi import HTTPException
     from uuid import UUID
+
+    from fastapi import HTTPException
 
     result = await db.execute(
         select(Diff).where(
@@ -158,8 +160,9 @@ async def get_diff_download(
     url_id: str, diff_id: str, db: AsyncSession = Depends(get_session)
 ):
     """Download diff as HTML/JSON."""
-    from fastapi import HTTPException
     from uuid import UUID
+
+    from fastapi import HTTPException
 
     result = await db.execute(
         select(Diff).where(

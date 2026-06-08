@@ -1,10 +1,8 @@
 """Snapshot service layer."""
 
 import logging
-from typing import Optional
 
 from app.models.snapshot import UrlSnapshot
-from app.models.url import Url
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +34,10 @@ class SnapshotService:
         await self.db.refresh(snapshot)
         return snapshot
 
-    async def get_latest_snapshot(self, url_id: str) -> Optional[UrlSnapshot]:
+    async def get_latest_snapshot(self, url_id: str) -> UrlSnapshot | None:
         """Get the latest snapshot for a URL."""
         from sqlalchemy import select
+
         from app.models.snapshot import UrlSnapshot as SnapshotModel
 
         result = await self.db.execute(
@@ -69,7 +68,7 @@ class SnapshotService:
 
     async def prune_old_snapshots(self, url_id: str, keep: int = 30) -> int:
         """Prune old snapshots, keeping only the latest N."""
-        from sqlalchemy import select, delete
+        from sqlalchemy import select
 
         result = await self.db.execute(
             select(UrlSnapshot)

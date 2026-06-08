@@ -3,8 +3,6 @@
 from fastapi import APIRouter
 from sqlalchemy import text
 
-from app.db.session import get_session
-
 router = APIRouter()
 
 

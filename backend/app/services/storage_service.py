@@ -1,7 +1,6 @@
 """Storage service layer for S3/MinIO/Cloud Storage."""
 
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +80,7 @@ class StorageService:
 
         return f"{self.backend}://{bucket}/{key}"
 
-    async def download_snapshot(self, url: str) -> Optional[bytes]:
+    async def download_snapshot(self, url: str) -> bytes | None:
         """Download a snapshot from storage."""
         if not url.startswith(f"{self.backend}://"):
             return None
