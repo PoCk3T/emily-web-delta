@@ -3,7 +3,7 @@
 import asyncio
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,6 +51,118 @@ DEFAULT_URLS = [
         "name": "Anthropic Privacy Policy",
         "url": "https://www.anthropic.com/legal/privacy",
         "tags": ["anthropic", "privacy"],
+    },
+    # Stripe
+    {
+        "name": "Stripe Privacy Policy",
+        "url": "https://stripe.com/privacy",
+        "tags": ["stripe", "privacy"],
+    },
+    # Stripe Pricing - International
+    {
+        "name": "Stripe Pricing (US)",
+        "url": "https://stripe.com/pricing",
+        "tags": ["stripe", "pricing", "us"],
+    },
+    {
+        "name": "Stripe Pricing (UK)",
+        "url": "https://stripe.com/gb/pricing",
+        "tags": ["stripe", "pricing", "gb"],
+    },
+    {
+        "name": "Stripe Pricing (IE)",
+        "url": "https://stripe.com/ie/pricing",
+        "tags": ["stripe", "pricing", "ie"],
+    },
+    {
+        "name": "Stripe Local Payment Methods (IE)",
+        "url": "https://stripe.com/ie/pricing/local-payment-methods",
+        "tags": ["stripe", "pricing", "ie", "lpm"],
+    },
+    {
+        "name": "Stripe Pricing (DE)",
+        "url": "https://stripe.com/de/pricing",
+        "tags": ["stripe", "pricing", "de"],
+    },
+    {
+        "name": "Stripe Local Payment Methods (DE)",
+        "url": "https://stripe.com/de/pricing/local-payment-methods",
+        "tags": ["stripe", "pricing", "de", "lpm"],
+    },
+    {
+        "name": "Stripe Pricing (SG)",
+        "url": "https://stripe.com/en-sg/pricing",
+        "tags": ["stripe", "pricing", "sg"],
+    },
+    {
+        "name": "Stripe Pricing (JP)",
+        "url": "https://stripe.com/en-jp/pricing",
+        "tags": ["stripe", "pricing", "jp"],
+    },
+    {
+        "name": "Stripe Pricing (BR)",
+        "url": "https://stripe.com/en-br/pricing",
+        "tags": ["stripe", "pricing", "br"],
+    },
+    {
+        "name": "Stripe Connect Pricing (BR)",
+        "url": "https://stripe.com/en-br/connect/pricing",
+        "tags": ["stripe", "pricing", "br", "connect"],
+    },
+    {
+        "name": "Stripe Pricing (MX)",
+        "url": "https://stripe.com/mx/pricing",
+        "tags": ["stripe", "pricing", "mx"],
+    },
+    {
+        "name": "Stripe Pricing (EN-MX)",
+        "url": "https://stripe.com/en-mx/pricing",
+        "tags": ["stripe", "pricing", "mx", "en"],
+    },
+    {
+        "name": "Stripe Local Payment Methods (MX)",
+        "url": "https://stripe.com/mx/pricing/local-payment-methods",
+        "tags": ["stripe", "pricing", "mx", "lpm"],
+    },
+    {
+        "name": "Stripe Connect Pricing (EN-MX)",
+        "url": "https://stripe.com/en-mx/connect/pricing",
+        "tags": ["stripe", "pricing", "mx", "connect"],
+    },
+    {
+        "name": "Stripe Pricing (NZ)",
+        "url": "https://stripe.com/nz/pricing",
+        "tags": ["stripe", "pricing", "nz"],
+    },
+    {
+        "name": "Stripe Pricing (AT)",
+        "url": "https://stripe.com/at/pricing",
+        "tags": ["stripe", "pricing", "at"],
+    },
+    {
+        "name": "Stripe Pricing (LU)",
+        "url": "https://stripe.com/de-lu/pricing",
+        "tags": ["stripe", "pricing", "lu"],
+    },
+    {
+        "name": "Stripe Pricing (CH)",
+        "url": "https://stripe.com/de-ch/pricing",
+        "tags": ["stripe", "pricing", "ch"],
+    },
+    {
+        "name": "Stripe Pricing (AE)",
+        "url": "https://stripe.com/ae/pricing",
+        "tags": ["stripe", "pricing", "ae"],
+    },
+    {
+        "name": "Stripe Connect Pricing (AE)",
+        "url": "https://stripe.com/ae/connect/pricing",
+        "tags": ["stripe", "pricing", "ae", "connect"],
+    },
+    {
+        "name": "Stripe Pricing (ES)",
+        "url": "https://stripe.com/es/pricing",
+        "tags": ["stripe", "pricing", "es"],
     },
 ]
 
@@ -103,10 +215,22 @@ async def seed_user():
             existing_urls = await db.execute(
                 select(Url).where(Url.tenant_id == tenant.id)
             )
-            existing_url_set = {u.url for u in existing_urls.scalars().all()}
+            existing_url_map = {u.url: u for u in existing_urls.scalars().all()}
 
-            for entry in DEFAULT_URLS:
-                if entry["url"] in existing_url_set:
+            # Calculate spacing for staggered initial checks
+            # 7200 seconds (2 hours) spread across all DEFAULT_URLS
+            stagger_interval = 7200 // len(DEFAULT_URLS)
+            now = datetime.now(timezone.utc)
+
+            for idx, entry in enumerate(DEFAULT_URLS):
+                next_check_time = now + timedelta(seconds=idx * stagger_interval)
+
+                if entry["url"] in existing_url_map:
+                    # Update existing URL's interval and stagger check
+                    url = existing_url_map[entry["url"]]
+                    url.interval_seconds = 7200
+                    url.next_check = next_check_time
+                    db.add(url)
                     skipped_count += 1
                     continue
 
@@ -115,9 +239,10 @@ async def seed_user():
                     name=entry["name"],
                     url=entry["url"],
                     backend="selfhosted",
-                    interval_seconds=3600,
+                    interval_seconds=7200,
                     enabled=True,
                     tags=entry["tags"],
+                    next_check=next_check_time,
                 )
                 db.add(url)
                 created_count += 1
