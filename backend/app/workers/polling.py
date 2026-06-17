@@ -263,7 +263,9 @@ async def async_poll_urls(url_ids: list[str] | None = None) -> dict:
             results = []
             for url in urls:
                 try:
-                    check_result = await async_poll_single_url(db, url)
+                    check_result = await asyncio.wait_for(
+                        async_poll_single_url(db, url), timeout=120.0
+                    )
                     results.append(
                         {
                             "url_id": str(url.id),
@@ -288,7 +290,7 @@ async def async_poll_urls(url_ids: list[str] | None = None) -> dict:
         await close_db()
 
 
-@celery_app.task(bind=True, max_retries=3)
+@celery_app.task(bind=True, max_retries=3, time_limit=300, soft_time_limit=240)
 def poll_urls(self, url_ids: list[str] | None = None):
     """Poll a batch of URLs (sync celery wrapper around async implementation)."""
     logger.info("Celery task poll_urls started.")
