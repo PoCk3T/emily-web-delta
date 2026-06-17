@@ -16,6 +16,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    init: true
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
     ports:
       - "8000:8000"
@@ -44,6 +45,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    init: true
     volumes:
       - ./backend:/app
     environment:
