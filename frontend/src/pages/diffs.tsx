@@ -1,6 +1,6 @@
-import { useDiffs, useDiffAiSummary } from '../hooks/useAuth';
+import { useDiffs, useDiffAiSummary, useUrls } from '../hooks/useAuth';
 import { formatRelative } from '../lib/utils';
-import { GitCompare, Loader2, Sparkles } from 'lucide-react';
+import { GitCompare, Loader2, Sparkles, ExternalLink } from 'lucide-react';
 import { useState } from 'react';
 
 // Unified Diff Row Extractor
@@ -150,6 +150,9 @@ export default function DiffsPage() {
   const { data: diffsData, isLoading } = useDiffs();
   const diffs = diffsData?.items ?? [];
 
+  const { data: urlsData } = useUrls({ pageSize: 1000 });
+  const urls = urlsData?.items ?? [];
+
   const [selectedDiffId, setSelectedDiffId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'unified' | 'side-by-side' | 'json'>('unified');
 
@@ -202,7 +205,9 @@ export default function DiffsPage() {
                 <h3 className="text-sm font-semibold text-gray-900 dark:text-white">All Diffs</h3>
               </div>
               <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto dark:divide-gray-700">
-                {diffs.map((diff) => (
+                {diffs.map((diff) => {
+                  const urlObj = urls.find((u) => u.id === diff.urlId);
+                  return (
                   <button
                     key={diff.id}
                     onClick={() => {
@@ -221,13 +226,22 @@ export default function DiffsPage() {
                       <span className="text-xs text-gray-400">{formatRelative(diff.createdAt)}</span>
                     </div>
                     <p className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">
-                      {diff.diffType} • URL: {diff.urlId.substring(0, 8)}
+                      {diff.diffType} • URL: {urlObj?.name || diff.urlId.substring(0, 8)}
                     </p>
+                    {urlObj && (
+                      <div className="mt-1 flex items-center gap-1 text-xs text-brand-600 dark:text-brand-400 hover:underline">
+                        <ExternalLink size={12} />
+                        <a href={urlObj.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="truncate">
+                          {urlObj.url}
+                        </a>
+                      </div>
+                    )}
                     {diff.summary && (
                       <p className="mt-1 truncate text-xs text-gray-400 dark:text-gray-500">{diff.summary}</p>
                     )}
                   </button>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -236,6 +250,25 @@ export default function DiffsPage() {
           <div className="lg:col-span-2">
             {selectedDiff ? (
               <div className="space-y-4">
+                {/* Selected URL Context */}
+                {(() => {
+                  const urlObj = urls.find((u) => u.id === selectedDiff.urlId);
+                  if (!urlObj) return null;
+                  return (
+                    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+                      <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                        {urlObj.name}
+                      </h2>
+                      <div className="mt-1 flex items-center gap-1 text-sm text-brand-600 dark:text-brand-400 hover:underline">
+                        <ExternalLink size={14} />
+                        <a href={urlObj.url} target="_blank" rel="noopener noreferrer" className="truncate">
+                          {urlObj.url}
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* AI Summary */}
                 {(aiSummaryData?.summary || selectedDiff.aiSummary) && (
                   <div className="rounded-lg border border-brand-200 bg-brand-50 p-4 dark:border-brand-800 dark:bg-brand-900/20">
