@@ -142,6 +142,21 @@ Deploying and maintaining high-density workloads on shared-resource instances (l
     gcloud compute ssh emily-scanner-vm --zone=us-west1-a --tunnel-through-iap
     ```
 
+### Lesson 6: Non-Interactive Executions & TTY Allocation Hangs
+*   **The Issue:** Running helper containers (like `docker compose run`) from remote non-interactive shell scripts defaults to allocating a pseudo-TTY. Without interactive input, the process hangs indefinitely waiting for standard input.
+*   **The Fix:** Always pass the TTY-disabling flag `-T` (or `--no-TTY`) when running helper scripts remotely:
+    ```bash
+    docker compose run -T --rm api python seed_user.py
+    ```
+
+### Lesson 7: Stale/Dead Containers & Storage Driver Volume Locks
+*   **The Issue:** Aborted or interrupted deployments can leave containers in a `Dead` state. Subsequent runs will conflict on container names (`Conflict. The container name "/app-api-1" is already in use...`). Normal force-removal (`docker rm -f`) may hang or fail with `removal is already in progress` due to kernel filesystem locks in the overlay2 storage driver.
+*   **The Fix:** Restart the host VM's Docker service to break filesystem and lock contention, then cleanly remove the stale containers:
+    ```bash
+    sudo systemctl restart docker
+    docker rm -f app-db-1 app-api-run-a03e2cda5c79
+    ```
+
 ---
 
 ## 5. Host Setup & Docker Installation
@@ -192,16 +207,31 @@ sudo usermod -aG docker $USER
 ## 6. Codebase Deployment & Production Environment Setup
 
 ### A. Synchronizing Files
-Copy your local repository to the VM using `gcloud compute scp` or `rsync` over IAP.
-
-Using `rsync` with a temporary wrapper script allows efficient synchronization excluding node modules, caches, and local configurations. Alternatively, copy essential orchestration configurations:
+To copy your local repository (including `backend`, `frontend`, and orchestration configs) cleanly and rapidly while excluding massive dependency folders (like `.git`, `node_modules`, virtual envs, or caches), package your codebase into a temporary compressed tarball locally, upload it over IAP, and extract it on the host:
 
 ```bash
-# Create the target directory
+# 1. Package the clean codebase locally
+tar -czf app.tar.gz \
+  --exclude='.git' \
+  --exclude='node_modules' \
+  --exclude='.venv*' \
+  --exclude='.ruff_cache' \
+  --exclude='__pycache__' \
+  --exclude='frontend/dist' \
+  --exclude='.env' \
+  backend frontend docker-compose.yml .dockerignore .gitignore
+
+# 2. Create the remote directory
 gcloud compute ssh emily-scanner-vm --zone=us-west1-a --tunnel-through-iap --command="mkdir -p ~/app"
 
-# Copy the core directory structures
-gcloud compute scp ./docker-compose.yml emily-scanner-vm:~/app/docker-compose.yml --zone=us-west1-a --tunnel-through-iap
+# 3. Securely upload the bundle over IAP
+gcloud compute scp app.tar.gz emily-scanner-vm:~/app.tar.gz --zone=us-west1-a --tunnel-through-iap
+
+# 4. Extract and clean up the bundle on the host VM
+gcloud compute ssh emily-scanner-vm --zone=us-west1-a --tunnel-through-iap --command="tar -xzf ~/app.tar.gz -C ~/app/ && rm ~/app.tar.gz"
+
+# 5. Remove the local temporary tarball
+rm app.tar.gz
 ```
 
 ### B. Production Environment Configuration

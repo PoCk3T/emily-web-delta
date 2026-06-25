@@ -191,7 +191,7 @@ DEFAULT_URLS = [
 ]
 
 
-async def seed_user():
+async def seed_user(force_seed=False):
     await init_db()
 
     async with async_session_factory() as db:
@@ -227,12 +227,12 @@ async def seed_user():
             print(f"User ID: {user.id}")
             print("Password: emilyadmin123")
 
-        # Seed default URLs (always run — idempotent via URL uniqueness)
-        # Find the tenant to associate URLs with
+        # Seed default URLs — always normalize to DEFAULT_URLS list
+        # This ensures we have all current defaults, even if old runs had fewer
         tenant_result = await db.execute(select(Tenant).where(Tenant.name == "Emily"))
         tenant = tenant_result.scalar_one_or_none()
         created_count = 0
-        skipped_count = 0
+        updated_count = 0
         if not tenant:
             print("No tenant found — skipping URL seeding")
         else:
@@ -240,6 +240,16 @@ async def seed_user():
                 select(Url).where(Url.tenant_id == tenant.id)
             )
             existing_url_map = {u.url: u for u in existing_urls.scalars().all()}
+
+            # Track which URLs are "seeded" vs "manually added"
+            SEED_TAG = "seeded"
+            all_seeded = {
+                u for u in existing_urls.scalars().all() if SEED_TAG in (u.tags or [])
+            }
+            existing_seeded_map = {u.url: u for u in all_seeded}
+            manual_added = {
+                u.url: u for u in existing_urls.scalars().all() if u not in all_seeded
+            }
 
             # Calculate spacing for staggered initial checks
             # 7200 seconds (2 hours) spread across all DEFAULT_URLS
@@ -254,8 +264,11 @@ async def seed_user():
                     url = existing_url_map[entry["url"]]
                     url.interval_seconds = 7200
                     url.next_check = next_check_time
+                    # Mark as seeded if not already
+                    if SEED_TAG not in (url.tags or []):
+                        url.tags = (url.tags or []) + [SEED_TAG]
                     db.add(url)
-                    skipped_count += 1
+                    updated_count += 1
                     continue
 
                 url = Url(
@@ -265,22 +278,26 @@ async def seed_user():
                     backend="selfhosted",
                     interval_seconds=7200,
                     enabled=True,
-                    tags=entry["tags"],
+                    tags=entry["tags"] + [SEED_TAG],
                     next_check=next_check_time,
                 )
                 db.add(url)
                 created_count += 1
 
-            if created_count:
+            if created_count or updated_count:
                 await db.commit()
                 print(
-                    f"\nSeeded {created_count} default URLs ({skipped_count} already existed)"
+                    f"\nSeeded {created_count} new default URLs ({updated_count} updated)"
                 )
             else:
                 print(
-                    f"\nAll {len(DEFAULT_URLS)} default URLs already exist ({skipped_count} skipped)"
+                    f"\nAll {len(DEFAULT_URLS)} default URLs already exist ({updated_count} verified)"
                 )
+            print(
+                f"Manual/additional URLs: {len(manual_added)} (not affected by seeding)"
+            )
 
 
 if __name__ == "__main__":
     asyncio.run(seed_user())
+
