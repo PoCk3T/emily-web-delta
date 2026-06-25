@@ -2,11 +2,9 @@
 
 import asyncio
 import sys
-import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 # Add app to path
 sys.path.insert(0, "/app")
@@ -30,6 +28,11 @@ DEFAULT_URLS = [
         "url": "https://openai.com/policies/privacy-policy/",
         "tags": ["openai", "privacy"],
     },
+    {
+        "name": "OpenAI Business Terms",
+        "url": "https://openai.com/policies/business-terms",
+        "tags": ["openai", "business", "tos"],
+    },
     # Google / Gemini
     {
         "name": "Google Terms of Service",
@@ -37,15 +40,36 @@ DEFAULT_URLS = [
         "tags": ["google", "gemini", "tos"],
     },
     {
+        "name": "Google Cloud Platform Terms of Service",
+        "url": "https://cloud.google.com/terms",
+        "tags": ["google", "cloud", "business", "tos"],
+    },
+    {
         "name": "Google Privacy Policy",
         "url": "https://policies.google.com/privacy",
         "tags": ["google", "gemini", "privacy"],
+    },
+    # Microsoft / Azure
+    {
+        "name": "Microsoft Services Agreement",
+        "url": "https://www.microsoft.com/en-us/servicesagreement",
+        "tags": ["microsoft", "tos"],
+    },
+    {
+        "name": "Microsoft Azure Legal Information",
+        "url": "https://azure.microsoft.com/en-us/support/legal/subscription-agreement/",
+        "tags": ["microsoft", "azure", "business", "tos"],
     },
     # Anthropic
     {
         "name": "Anthropic Terms of Service",
         "url": "https://www.anthropic.com/legal/consumer-terms",
         "tags": ["anthropic", "tos"],
+    },
+    {
+        "name": "Anthropic Commercial Terms of Service",
+        "url": "https://www.anthropic.com/legal/commercial-terms",
+        "tags": ["anthropic", "business", "tos"],
     },
     {
         "name": "Anthropic Privacy Policy",
@@ -201,7 +225,7 @@ async def seed_user():
             print(f"Created user: {user.email}")
             print(f"Tenant: {tenant.name} (id={tenant.id})")
             print(f"User ID: {user.id}")
-            print(f"Password: emilyadmin123")
+            print("Password: emilyadmin123")
 
         # Seed default URLs (always run — idempotent via URL uniqueness)
         # Find the tenant to associate URLs with
@@ -220,7 +244,7 @@ async def seed_user():
             # Calculate spacing for staggered initial checks
             # 7200 seconds (2 hours) spread across all DEFAULT_URLS
             stagger_interval = 7200 // len(DEFAULT_URLS)
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
 
             for idx, entry in enumerate(DEFAULT_URLS):
                 next_check_time = now + timedelta(seconds=idx * stagger_interval)
