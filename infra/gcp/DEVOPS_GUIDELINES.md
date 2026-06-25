@@ -1,10 +1,24 @@
-# Emily Web Delta — GCP DevOps Deployment & Maintenance Guidelines
+# Emily Web Delta & Brazen Core — GCP DevOps Deployment & Maintenance Guidelines
 
-This document outlines the deployment, optimization, and maintenance workflows for the **Emily Web Delta** application on Google Cloud Platform (GCP). It is designed to guide a DevOps engineer through initial setup, troubleshooting, and continuous operations, capturing key architectural decisions and critical "lessons learned" from past deployments.
+This document outlines the deployment, optimization, and maintenance workflows for the **Emily Web Delta** application and the shared **Brazen Core** microservices on Google Cloud Platform (GCP). It is designed to guide engineering and DevOps through initial setup, greenfield IAM provisioning, VM management, and troubleshooting, capturing critical lessons learned from past deployments to prevent configuration drift.
 
 ---
 
-## 1. Initial GCP Account & Context Verification
+## Table of Contents
+
+1. [GCP Project & Initial Context Verification](#1-gcp-project--initial-context-verification)
+2. [Infrastructure Setup & Network Security](#2-infrastructure-setup--network-security)
+3. [Greenfield IAM Provisioning & Service Accounts Matrix](#3-greenfield-iam-provisioning--service-accounts-matrix)
+   - [A. Required Service Accounts & Project-Level Roles](#a-required-service-accounts--project-level-roles)
+   - [B. Resource-Level Bindings & SA-to-SA Trusts](#b-resource-level-bindings--sa-to-sa-trusts)
+   - [C. Unified Setup & Remediation Commands (Fix-All Script)](#c-unified-setup--remediation-commands-fix-all-script)
+4. [Single-VM Host Provisioning & Optimizations (Emily Scanner VM)](#4-single-vm-host-provisioning--optimizations-emily-scanner-vm)
+5. [VM Host Codebase Deployment & Production Setup](#5-vm-host-codebase-deployment--production-setup)
+6. [Key Architectural Lessons Learned (Operational Gotchas)](#6-key-architectural-lessons-learned-operational-gotchas)
+
+---
+
+## 1. GCP Project & Initial Context Verification
 
 Before creating resources, verify the active identity and ensure the target project is correctly activated in the CLI context.
 
@@ -15,8 +29,8 @@ gcloud auth list
 # Set the active account to your corporate deployment identity
 gcloud config set account lucas@codimite.com
 
-# Verify and configure the target project
-gcloud config set project emily-levin-web-delta-scanner
+# Verify and configure the target project (e.g. emily-levin-web-delta-scanner or ai-agentic-marketing-core)
+gcloud config set project ai-agentic-marketing-core
 gcloud config list
 ```
 
@@ -24,13 +38,25 @@ gcloud config list
 
 ## 2. Infrastructure Setup & Network Security
 
-### A. Core Services Activation
-Activate the Compute Engine API:
+### A. Core APIs Activation
+Enable all necessary Google Cloud APIs before running any deployment script or Terraform plan:
 ```bash
-gcloud services enable compute.googleapis.com
+gcloud services enable \
+    run.googleapis.com \
+    compute.googleapis.com \
+    artifactregistry.googleapis.com \
+    cloudbuild.googleapis.com \
+    sqladmin.googleapis.com \
+    redis.googleapis.com \
+    servicenetworking.googleapis.com \
+    secretmanager.googleapis.com \
+    firestore.googleapis.com \
+    cloudtasks.googleapis.com \
+    vpcaccess.googleapis.com \
+    --project=ai-agentic-marketing-core
 ```
 
-### B. Network Firewall Configuration
+### B. Network Firewall Configuration (VM Host Only)
 Do not expose the application's infrastructure ports (FastAPI on `8000`, PostgreSQL on `5432`, Redis on `6379`, or MinIO on `9000`/`9001`) to the public internet. Keep these strictly bound to Docker's internal default bridge network. 
 
 Only ports `80` (HTTP web access) and `22` (SSH administrative access) should be allowed through ingress rules:
@@ -38,7 +64,7 @@ Only ports `80` (HTTP web access) and `22` (SSH administrative access) should be
 ```bash
 # Allow ingress web traffic to tagged VM instances
 gcloud compute firewall-rules create allow-http \
-  --project=emily-levin-web-delta-scanner \
+  --project=ai-agentic-marketing-core \
   --direction=INGRESS \
   --priority=1000 \
   --network=default \
@@ -47,9 +73,9 @@ gcloud compute firewall-rules create allow-http \
   --source-ranges=0.0.0.0/0 \
   --target-tags=http-server
 
-# Allow ingress SSH traffic (acts as a baseline fallback)
+# Allow ingress SSH traffic
 gcloud compute firewall-rules create allow-ssh \
-  --project=emily-levin-web-delta-scanner \
+  --project=ai-agentic-marketing-core \
   --direction=INGRESS \
   --priority=1000 \
   --network=default \
@@ -60,11 +86,102 @@ gcloud compute firewall-rules create allow-ssh \
 
 ---
 
-## 3. VM Provisioning & Administrative Access
+## 3. Greenfield IAM Provisioning & Service Accounts Matrix
+
+This is the **critical reference checklist** to prevent recurring "missing binding" errors. When standing up a greenfield GCP project, these identities must be manually provisioned or verified first, and all roles applied.
+
+### A. Required Service Accounts & Project-Level Roles
+
+| Service / Workload | Service Account (SA) Email Name | Required Project-Level Roles | Purpose & Triggered Code Path |
+|---|---|---|---|
+| `api-gateway` | `api-gateway@` | `roles/cloudsql.client`<br>`roles/cloudsql.instanceUser`<br>`roles/datastore.user`<br>`roles/secretmanager.admin` | Connects to DB via asyncpg. Manages onboarding state in Firestore. Creates/modifies/deletes tenant secrets in Secret Manager. |
+| `analytics-api` | `analytics-api@` | `roles/bigquery.dataViewer`<br>`roles/bigquery.jobUser` | Submits BigQuery jobs to query performance marts (`fct_ad_performance`). |
+| `brand-analyzer` | `brand-analyzer@` | `roles/aiplatform.user`<br>`roles/cloudsql.client`<br>`roles/cloudsql.instanceUser`<br>`roles/datastore.user`<br>`roles/secretmanager.secretAccessor` | Calls Gemini/Vertex AI. Writes analysis to Postgres (`brand_brain`) and updates status in Firestore. |
+| `tenant-provisioner` | `tenant-provisioner@` | `roles/cloudsql.client`<br>`roles/cloudsql.instanceUser`<br>`roles/bigquery.admin`<br>`roles/cloudtasks.enqueuer`<br>`roles/datastore.user`<br>`roles/firebaseauth.admin`<br>`roles/iam.serviceAccountTokenCreator`<br>`roles/secretmanager.admin` | Creates schemas in Postgres. Provisions BigQuery datasets. Enqueues tasks. Configures custom claims in Firebase. Generates internal OIDC tokens. |
+| `assigntenant` *(blocking function)* | `blocking-fn@` | `roles/datastore.user`<br>`roles/run.invoker` | Reads user-to-tenant mappings in Firestore. Invokes internal provisioning triggers securely. |
+| `webhook-receiver` | `webhook-receiver@` | `roles/secretmanager.secretAccessor` | Reads webhook provider signing signatures (Shopify, Meta) to verify payloads. |
+| `execution-orchestrator` | `execution-orchestrator@` | `roles/cloudsql.client`<br>`roles/cloudsql.instanceUser`<br>`roles/redis.editor`<br>`roles/datastore.user`<br>`roles/secretmanager.secretAccessor`<br>`roles/iam.serviceAccountTokenCreator` | Connects to Postgres Token Vault. Coordinates distributed locks and rate limits in Redis. |
+| **Shared App Services** *(Used by creative-api, agent-proxy, anomaly-alerter, google-ads-mcp)* | `brazen-services@` | `roles/aiplatform.user`<br>`roles/bigquery.dataEditor`<br>`roles/bigquery.user`<br>`roles/cloudtasks.enqueuer`<br>`roles/storage.objectUser`<br>`roles/iam.serviceAccountTokenCreator`<br>`roles/datastore.user`<br>`roles/redis.editor` | Shared runtime identity. Vertex AI generation, ad-platform live reads, GCS media uploads, and temporary Redis lock storage. |
+| **Tasks Runner** *(Internal queue runner)* | `tasks-runner@` | *(No project-wide roles)* | OIDC identity embedded within Cloud Tasks. Only needs resource-level invoker permissions on target services. |
+
+---
+
+### B. Resource-Level Bindings & SA-to-SA Trusts
+
+To maintain security boundaries, these resource-level access permissions are mandatory:
+
+1. **Cloud Run Service Invoker Rights (`roles/run.invoker`):**
+   - Private backends (`brand-analyzer`, `tenant-provisioner`, `creative-api`, `anomaly-alerter`, `agent-proxy`, `execution-orchestrator`, `google-ads-mcp`) must be deployed with `--no-allow-unauthenticated` and explicitly grant `roles/run.invoker` to:
+     - `api-gateway@...` (enables proxying from the gateway router).
+     - `tasks-runner@...` (enables Cloud Tasks queues to trigger async callbacks).
+     - `blocking-fn@...` (for triggering `tenant-provisioner` during Firebase blocking callbacks).
+2. **Cloud Tasks Enqueue Rights (`roles/cloudtasks.enqueuer`):**
+   - `brand-analysis-queue` must grant enqueue rights explicitly to `brand-analyzer@...`.
+3. **Identity Delegation / Service Account Actor (`roles/iam.serviceAccountUser`):**
+   - To dispatch asynchronous tasks carrying the `tasks-runner` identity, both the `brand-analyzer@...` and `tenant-provisioner@...` service accounts **must** be granted `roles/iam.serviceAccountUser` on the target `tasks-runner` service account.
+4. **Cloud Storage Blob Signer (`roles/iam.serviceAccountTokenCreator`):**
+   - SAs generating GCS dynamic pre-signed media URLs (`brazen-services@` and `api-gateway@`) must be granted Token Creator on **themselves** to permit dynamic cryptographic asset signing in serverless runtimes.
+
+---
+
+### C. Unified Setup & Remediation Commands (Fix-All Script)
+
+Run this copy-pasteable script to stand up a pristine IAM baseline, create any missing service accounts, and apply all project-level role bindings automatically to avoid configuration drift:
+
+```bash
+# Set your project ID
+export PROJECT_ID="ai-agentic-marketing-core"
+
+# 1. Ensure dedicated Service Accounts exist
+gcloud iam service-accounts create api-gateway --display-name="API Gateway Router" --project=$PROJECT_ID || true
+gcloud iam service-accounts create analytics-api --display-name="Analytics API" --project=$PROJECT_ID || true
+gcloud iam service-accounts create brand-analyzer --display-name="Brand Analyzer Service" --project=$PROJECT_ID || true
+gcloud iam service-accounts create tenant-provisioner --display-name="Tenant Provisioner Saga" --project=$PROJECT_ID || true
+gcloud iam service-accounts create blocking-fn --display-name="Firebase blocking-fn" --project=$PROJECT_ID || true
+gcloud iam service-accounts create webhook-receiver --display-name="Webhook Receiver" --project=$PROJECT_ID || true
+gcloud iam service-accounts create execution-orchestrator --display-name="Execution Orchestrator" --project=$PROJECT_ID || true
+gcloud iam service-accounts create brazen-services --display-name="Brazen Shared App Services" --project=$PROJECT_ID || true
+gcloud iam service-accounts create tasks-runner --display-name="Cloud Tasks Queue Runner" --project=$PROJECT_ID || true
+
+# 2. Apply Project-Level Role Bindings
+declare -A BINDINGS=(
+  ["api-gateway"]="roles/cloudsql.client roles/cloudsql.instanceUser roles/datastore.user roles/secretmanager.admin"
+  ["analytics-api"]="roles/bigquery.dataViewer roles/bigquery.jobUser"
+  ["brand-analyzer"]="roles/aiplatform.user roles/cloudsql.client roles/cloudsql.instanceUser roles/datastore.user roles/secretmanager.secretAccessor"
+  ["tenant-provisioner"]="roles/cloudsql.client roles/cloudsql.instanceUser roles/bigquery.admin roles/cloudtasks.enqueuer roles/datastore.user roles/firebaseauth.admin roles/iam.serviceAccountTokenCreator roles/secretmanager.admin"
+  ["blocking-fn"]="roles/datastore.user roles/run.invoker"
+  ["webhook-receiver"]="roles/secretmanager.secretAccessor"
+  ["execution-orchestrator"]="roles/cloudsql.client roles/cloudsql.instanceUser roles/redis.editor roles/datastore.user roles/secretmanager.secretAccessor roles/iam.serviceAccountTokenCreator"
+  ["brazen-services"]="roles/aiplatform.user roles/bigquery.dataEditor roles/bigquery.user roles/cloudtasks.enqueuer roles/storage.objectUser roles/iam.serviceAccountTokenCreator roles/datastore.user roles/redis.editor"
+)
+
+for SA in "${!BINDINGS[@]}"; do
+  for ROLE in ${BINDINGS[$SA]}; do
+    echo "Binding $ROLE to $SA..."
+    gcloud projects add-iam-policy-binding $PROJECT_ID \
+      --member="serviceAccount:$SA@$PROJECT_ID.iam.gserviceaccount.com" \
+      --role="$ROLE" --quiet
+  done
+done
+
+# 3. Grant Service Account User to Tasks Runner
+gcloud iam service-accounts add-iam-policy-binding tasks-runner@$PROJECT_ID.iam.gserviceaccount.com \
+  --member="serviceAccount:brand-analyzer@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/iam.serviceAccountUser" --project=$PROJECT_ID --quiet
+
+gcloud iam service-accounts add-iam-policy-binding tasks-runner@$PROJECT_ID.iam.gserviceaccount.com \
+  --member="serviceAccount:tenant-provisioner@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/iam.serviceAccountUser" --project=$PROJECT_ID --quiet
+```
+
+---
+
+## 4. Single-VM Host Provisioning & Optimizations (Emily Scanner VM)
+
+When deploying to a single VM host (such as `emily-scanner-vm` on `debian-12` minimal), follow these provisioning configurations to guarantee stability.
 
 ### A. VM Metadata Key Preparation
-Google Cloud VM metadata expects keys formatted as `username:ssh-key`. ed25519 is preferred over RSA for security and speed.
-
+Google Cloud VM metadata expects keys formatted as `username:ssh-key`.
 ```bash
 # Generate the key pair locally
 ssh-keygen -t ed25519 -f ~/.ssh/emily-vm-key -C "emily" -N ""
@@ -74,11 +191,10 @@ echo "emily:$(cat ~/.ssh/emily-vm-key.pub)" > ~/.ssh/gcp_ssh_keys
 ```
 
 ### B. VM Instance Provisioning
-Create an `e2-micro` virtual machine. Use a standard `debian-12` image family, attaching a 30GB boot disk.
-
+Create an `e2-micro` virtual machine with a standard 30GB boot disk and http/ssh tags:
 ```bash
 gcloud compute instances create emily-scanner-vm \
-  --project=emily-levin-web-delta-scanner \
+  --project=ai-agentic-marketing-core \
   --zone=us-west1-a \
   --machine-type=e2-micro \
   --network-interface=network-tier=STANDARD,subnet=default \
@@ -97,117 +213,42 @@ gcloud compute instances describe emily-scanner-vm \
   --format='get(networkInterfaces[0].accessConfigs[0].natIP)'
 ```
 
----
-
-## 4. Key Architectural Lessons Learned (Pitfalls Avoided)
-
-Deploying and maintaining high-density workloads on shared-resource instances (like `e2-micro` with 1GB RAM) requires strict optimization. Review these guidelines to prevent repeating common deployment errors:
-
-### Lesson 1: Resource Constrained Environments & Swap Allocation
-*   **The Issue:** An `e2-micro` VM provides only 1GB of physical memory. Spawning parallel Docker image builds, multi-worker FastAPI instances, and Celery worker threads quickly starves the system, triggering kernel Out-Of-Memory (OOM) lockups and making the Docker daemon unresponsive.
-*   **The Fix:** Configure a **2GB swap file** immediately on the Debian minimal host. This adds a critical memory buffer, keeping the OS and Docker daemon highly stable.
-
-### Lesson 2: Vite Build-Time vs. Runtime Environment Variables
-*   **The Issue:** Vite compiles environments statically at *build-time* inside the Docker builder stage. Standard Docker Compose runtime `environment` variables injected into the container have zero effect after compilation. If no build argument is supplied during compilation, the React client defaults to `http://localhost:8000/api/v1`. This forces client browsers to send API queries to their local machines, causing CORS loopback blocking (`net::ERR_FAILED`).
-*   **The Fix:** 
-    1. Default the client-side AXIOS base URL fallback to `/api/v1` (relative path) rather than `localhost`.
-    2. Define build-time arguments (`ARG VITE_API_BASE_URL=/api/v1`) in the frontend Dockerfile.
-    3. Configure `docker-compose.yml` to pass build arguments explicitly:
-       ```yaml
-       frontend:
-         build:
-           context: ./frontend
-           dockerfile: Dockerfile
-           args:
-             - VITE_API_BASE_URL=/api/v1
-       ```
-
-### Lesson 3: Volume Mount Ownership & Celery Beat Permissions
-*   **The Issue:** The celery beat process runs inside the backend container under a non-root user account (`emily`). If the backend source directory is bind-mounted (`./backend:/app`) to a host folder owned by the VM host deployment user, celery beat fails to write its schedule tracking file (`celerybeat-schedule`) to `/app/`, raising `_gdbm.error: [Errno 13] Permission denied` and crashing in a loop.
-*   **The Fix:** Explicitly redirect the celery beat schedule tracking file to `/tmp` (fully writeable by any container user) via the command flag:
-    ```yaml
-    command: celery -A app.celery_app beat --schedule=/tmp/celerybeat-schedule --loglevel=info
-    ```
-
-### Lesson 4: Thread & Worker Footprint Optimization
-*   **The Issue:** High default thread counts overwhelm thin virtual CPU allocation. Spawning 4 Uvicorn workers and 4 Celery worker processes creates high thread-context switching, starving other services like Redis or Postgres.
-*   **The Fix:** Scale down the container process footprint to maintain low overhead:
-    - Set `--workers 1` for the FastAPI Uvicorn execution command.
-    - Set `--concurrency=1` for the Celery worker process daemon.
-
-### Lesson 5: Proxy / CorpSSH Outbound Restrictions
-*   **The Issue:** In corporate networks utilizing security certificates, ProxyCommands, or strict egress controls, standard outbound SSH on port `22` can hang or get blocked with authentication failures.
-*   **The Fix:** Tunnel all SSH-based commands and file transfers over HTTPS port `443` through Google Cloud's Identity-Aware Proxy (IAP). This bypasses port `22` restrictions:
-    ```bash
-    gcloud compute ssh emily-scanner-vm --zone=us-west1-a --tunnel-through-iap
-    ```
-
-### Lesson 6: Non-Interactive Executions & TTY Allocation Hangs
-*   **The Issue:** Running helper containers (like `docker compose run`) from remote non-interactive shell scripts defaults to allocating a pseudo-TTY. Without interactive input, the process hangs indefinitely waiting for standard input.
-*   **The Fix:** Always pass the TTY-disabling flag `-T` (or `--no-TTY`) when running helper scripts remotely:
-    ```bash
-    docker compose run -T --rm api python seed_user.py
-    ```
-
-### Lesson 7: Stale/Dead Containers & Storage Driver Volume Locks
-*   **The Issue:** Aborted or interrupted deployments can leave containers in a `Dead` state. Subsequent runs will conflict on container names (`Conflict. The container name "/app-api-1" is already in use...`). Normal force-removal (`docker rm -f`) may hang or fail with `removal is already in progress` due to kernel filesystem locks in the overlay2 storage driver.
-*   **The Fix:** Restart the host VM's Docker service to break filesystem and lock contention, then cleanly remove the stale containers:
-    ```bash
-    sudo systemctl restart docker
-    docker rm -f app-db-1 app-api-run-a03e2cda5c79
-    ```
-
----
-
-## 5. Host Setup & Docker Installation
-
-SSH into your VM using the IAP tunnel to perform these initial provisioning steps:
-
+### C. Host Swap Allocation & Docker Installation
+Connect securely via IAP:
 ```bash
-# Connect securely via IAP
 gcloud compute ssh emily-scanner-vm --zone=us-west1-a --tunnel-through-iap
 ```
 
-### A. Host Swap Allocation
-Run the following commands on the remote VM to configure the 2GB swap space:
+Run these on the remote VM host to configure a **2GB swap file** (absolutely essential on 1GB RAM instances) and install Docker cleanly:
 ```bash
+# 1. Allocate Swap File
 sudo fallocate -l 2G /swapfile
 sudo chmod 600 /swapfile
 sudo mkswap /swapfile
 sudo swapon /swapfile
 echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-```
 
-### B. Docker Engine & Docker Compose Installation
-Install Docker using Debian's secure `/etc/apt/keyrings` keyring format:
-
-```bash
-# Update indexes and install utility packages
+# 2. Configure Docker Official Repositories
 sudo apt-get update && sudo apt-get install -y curl ca-certificates rsync
-
-# Configure Docker's official keyring and repository
 sudo install -m 0755 -d /etc/apt/keyrings
 sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
 sudo chmod a+r /etc/apt/keyrings/docker.asc
 
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-# Install Docker packages
+# 3. Install Docker Engine and Compose
 sudo apt-get update
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-# Grant active user permissions to execute Docker commands
 sudo usermod -aG docker $USER
 ```
-
-*Note: Log out and log back in or execute `newgrp docker` to apply the group membership updates.*
+*Note: Run `newgrp docker` or log out and back in to apply group privileges.*
 
 ---
 
-## 6. Codebase Deployment & Production Environment Setup
+## 5. VM Host Codebase Deployment & Production Setup
 
 ### A. Synchronizing Files
-To copy your local repository (including `backend`, `frontend`, and orchestration configs) cleanly and rapidly while excluding massive dependency folders (like `.git`, `node_modules`, virtual envs, or caches), package your codebase into a temporary compressed tarball locally, upload it over IAP, and extract it on the host:
+To copy your local repository cleanly and rapidly while excluding massive dependency folders (`node_modules`, `.venv`, `.git`), package your codebase into a temporary tarball locally, upload it over IAP, and extract it on the host:
 
 ```bash
 # 1. Package the clean codebase locally
@@ -221,22 +262,17 @@ tar -czf app.tar.gz \
   --exclude='.env' \
   backend frontend docker-compose.yml .dockerignore .gitignore
 
-# 2. Create the remote directory
+# 2. Create remote dir & securely upload
 gcloud compute ssh emily-scanner-vm --zone=us-west1-a --tunnel-through-iap --command="mkdir -p ~/app"
-
-# 3. Securely upload the bundle over IAP
 gcloud compute scp app.tar.gz emily-scanner-vm:~/app.tar.gz --zone=us-west1-a --tunnel-through-iap
 
-# 4. Extract and clean up the bundle on the host VM
+# 3. Extract and clean up
 gcloud compute ssh emily-scanner-vm --zone=us-west1-a --tunnel-through-iap --command="tar -xzf ~/app.tar.gz -C ~/app/ && rm ~/app.tar.gz"
-
-# 5. Remove the local temporary tarball
 rm app.tar.gz
 ```
 
 ### B. Production Environment Configuration
 SSH back into your VM and write default production configurations to `~/app/.env`:
-
 ```bash
 DATABASE_URL=postgresql+asyncpg://emily:emily@db:5432/emily
 REDIS_URL=redis://redis:6379/0
@@ -245,66 +281,87 @@ FIRECRAWL_API_KEY=<YOUR_API_KEY>
 VITE_API_BASE_URL=/api/v1
 ```
 
-Generate a secure production `SECRET_KEY` using:
+### C. Database Initialization, Seeding, and Stamps
+**Do not run `alembic upgrade head` directly on an empty database.** Create the schemas first via the dedicated python runner, seed the default user, and then stamp Alembic:
 ```bash
-python3 -c "import secrets; print(secrets.token_hex(16))"
-```
-
----
-
-## 7. Database Initialization, Seeding, and Stamps
-
-**Do not run `alembic upgrade head` directly on an empty Postgres database.** The migration files rely on database schemas and structures created dynamically by SQLAlchemy models.
-
-Execute initial schemas creation and user/monitored URLs seeding via the dedicated Python runner inside your container first, and then stamp the migration version:
-
-```bash
-# 1. Bring up the PostgreSQL and Redis containers first
 cd ~/app
 docker compose up -d db redis
-
-# 2. Verify PostgreSQL has initialized and is healthy
-docker inspect --format='{{json .State.Health}}' app-db-1
-
-# 3. Create all tables and seed the database with seed_user.py
 docker compose run --rm api python seed_user.py
-
-# 4. Stamp the database schema to synchronize with Alembic migrations
 docker compose run --rm api alembic stamp head
 ```
 
----
-
-## 8. Run, Build, and Health Monitoring
-
-### A. Start All Services
+### D. Start and Monitor All Services
 ```bash
-cd ~/app
+# Start all containers in the background
 docker compose up -d --build
-```
 
-### B. Health Verification
-Verify that all 7 containers are fully running and that no processes are looping or restarting:
-
-```bash
-# Inspect container states
+# Verify container stability and check logs
 docker compose ps
-
-# Check the API logs for stable initialization
 docker logs app-api-1
-
-# Check the Celery Beat scheduler logs
 docker logs app-beat-1
 
-# Check Nginx access and proxy logs
-docker logs app-frontend-1
+# Verify internal reverse-proxy accessibility
+curl http://localhost/api/v1/health
 ```
 
-Verify application accessibility by hitting the health endpoints from your host terminal:
-```bash
-# Verify base page serves the React static bundle
-curl -I http://<VM_PUBLIC_IP>
+---
 
-# Verify Nginx reverse-proxies the FastAPI server internally over Docker's bridge network
-curl http://<VM_PUBLIC_IP>/api/v1/health
-```
+## 6. Key Architectural Lessons Learned (Operational Gotchas)
+
+### Lesson 1: Resource Constrained VM Host lockups
+*   **The Issue:** An `e2-micro` VM provides only 1GB of physical memory. Parallel builds or multiple processes trigger Out-Of-Memory (OOM) locks, freezing the Docker daemon and SSH server.
+*   **The Fix:** Always configure a **2GB swap file** on the host. This buffers physical RAM starvation and ensures high-density workload stability.
+
+### Lesson 2: Vite Build-Time vs. Runtime Environment Variables
+*   **The Issue:** Vite compiles environment variables statically at *build-time* during the Docker builder stage. Standard Docker Compose runtime variables have zero effect once the static bundle is built.
+*   **The Fix:** Inject build-time arguments (`ARG VITE_API_BASE_URL=/api/v1`) explicitly in the client Dockerfile and define them inside the `docker-compose.yml` build block.
+
+### Lesson 3: Volume Mount Ownership & Celery Beat Permissions
+*   **The Issue:** Bind-mounting the backend directory (`./backend:/app`) to a host folder owned by the root deployment user causes Celery Beat to fail with `Permission denied` when trying to write its tracking file (`celerybeat-schedule`).
+*   **The Fix:** Explicitly redirect the celerybeat schedule file to `/tmp` via the startup command:
+    ```yaml
+    command: celery -A app.celery_app beat --schedule=/tmp/celerybeat-schedule --loglevel=info
+    ```
+
+### Lesson 4: Thread & Worker Footprint Optimization
+*   **The Issue:** High worker and thread counts overwhelm thin virtual CPU allocation.
+*   **The Fix:** Scale down the container footprints explicitly:
+    - Set `--workers 1` for FastAPI's Uvicorn execution command.
+    - Set `--concurrency=1` for Celery worker daemons.
+
+### Lesson 5: Proxy / CorpSSH Outbound Restrictions
+*   **The Issue:** Corporate networks utilizing certificates or custom ProxyCommands often block outbound SSH on port `22`.
+*   **The Fix:** Tunnel all SSH traffic over HTTPS port `443` through Identity-Aware Proxy (IAP):
+    ```bash
+    gcloud compute ssh emily-scanner-vm --zone=us-west1-a --tunnel-through-iap
+    ```
+
+### Lesson 6: Non-Interactive Executions & TTY Allocation Hangs
+*   **The Issue:** Running commands remotely via non-interactive shell scripts defaults to allocating a pseudo-TTY, which hangs indefinitely waiting for input.
+*   **The Fix:** Always pass the TTY-disabling flag `-T` (or `--no-TTY`):
+    ```bash
+    docker compose run -T --rm api python seed_user.py
+    ```
+
+### Lesson 7: Stale/Dead Containers & Storage Driver Volume Locks
+*   **The Issue:** Aborted deployments can leave containers in a `Dead` state, failing with name conflicts on subsequent starts. Force-removal (`docker rm -f`) fails due to kernel locks in the overlay2 storage driver.
+*   **The Fix:** Restart the host VM's Docker service to break filesystem lock contention, then cleanly remove:
+    ```bash
+    sudo systemctl restart docker
+    docker rm -f app-db-1 app-api-1
+    ```
+
+### Lesson 8: Cloud Run Microservices & Storage Bucket Environment Variables
+*   **The Issue:** Microservices writing files to Google Cloud Storage (such as `creative-api` uploading generated assets) often rely on environmental configuration flags like `BRAND_ASSETS_BUCKET`. If a deployment revision is rolled out without explicitly setting this variable, fallback hardcodings in shared packages (e.g., `os.environ.get("BRAND_ASSETS_BUCKET", "brazen-assets")`) can cause silent failures. The storage client attempts to write to a non-existent bucket (`brazen-assets` instead of `brazen-media-assets-ai-agentic-marketing-core`), causing upstream requests to hang and eventually timing out at the API Gateway level (raising `httpx.ReadTimeout` and returning 500 errors to the client).
+*   **The Fix:** Ensure all service deployment configs (Cloud Build files, Terraform definitions, or manual `gcloud run deploy` command setups) explicitly define essential environmental flags like `BRAND_ASSETS_BUCKET`. Avoid using hardcoded local fallback values for external cloud infrastructure names (like buckets or remote databases) in production-bound packages. Instead, force the application to fail fast with a clear initialization error during startup.
+
+### Lesson 9: Missing or Under-Configured `FRONTEND_URL` on `api-gateway` (400 CORS Errors)
+*   **The Issue:** If `FRONTEND_URL` is missing or does not explicitly contain all active frontend custom domains (like `https://marketing.upslope.tech`, `https://brazen.marketing.upslope.tech`, etc.), standard CORS preflight `OPTIONS` requests fail with `400 Bad Request` or "Disallowed CORS origin". The gateway falls back to `["http://localhost:3000"]` when `FRONTEND_URL` is omitted, blocking all custom-domain browsers.
+*   **The Fix:** Always deploy and update `api-gateway` with `FRONTEND_URL` explicitly configured to include all white-label frontend origins. Since the list contains commas, **always** use custom caret delimiters (`^@^`) in your `gcloud` command to prevent `gcloud` from misinterpreting commas as environment variable separators:
+  ```bash
+  gcloud run services update api-gateway \
+    --region=us-central1 \
+    --project=ai-agentic-marketing-core \
+    --update-env-vars="^@^FRONTEND_URL=https://marketing.upslope.tech,https://brazen.marketing.upslope.tech,https://goldengate.marketing.upslope.tech,https://redpocket.marketing.upslope.tech,https://app.goldengateads.com,https://app.brazen.ai,https://frontend-723572939533.us-central1.run.app,http://localhost:3000"
+  ```
+  Ensure all automated deployment scripts preserve and include `FRONTEND_URL`.
