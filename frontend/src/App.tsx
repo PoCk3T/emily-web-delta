@@ -132,6 +132,7 @@ function App() {
                   <Route path={ROUTES.urlDetail} element={<UrlDetailPage />} />
                   <Route path={ROUTES.checks} element={<ChecksPage />} />
                   <Route path={ROUTES.diffs} element={<DiffsPage />} />
+                  <Route path={`${ROUTES.diffs}/:diffId`} element={<DiffsPage />} />
                   <Route path={ROUTES.analytics} element={<AnalyticsPage />} />
                   <Route path={ROUTES.settings} element={<SettingsPage />} />
                   <Route path={ROUTES.admin} element={<AdminPage />} />

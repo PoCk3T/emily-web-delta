@@ -78,6 +78,8 @@ export interface Diff {
   summary: string | null;
   aiSummary: string | null;
   createdAt: string;
+  url?: string;
+  urlName?: string;
 }
 
 export interface CreateDiffRequest {

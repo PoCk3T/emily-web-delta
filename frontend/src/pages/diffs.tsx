@@ -1,7 +1,8 @@
-import { useDiffs, useDiffAiSummary, useUrls } from '../hooks/useAuth';
+import { useDiffs, useDiffAiSummary, useUrls, useDiff } from '../hooks/useAuth';
 import { formatRelative } from '../lib/utils';
-import { GitCompare, Loader2, Sparkles, ExternalLink } from 'lucide-react';
-import { useState } from 'react';
+import { GitCompare, Loader2, Sparkles, ExternalLink, X } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 
 // Unified Diff Row Extractor
 function parseUnifiedDiff(diffText: string) {
@@ -147,16 +148,39 @@ function JsonDiffViewer({ selectedDiff }: { selectedDiff: any }) {
 }
 
 export default function DiffsPage() {
-  const { data: diffsData, isLoading } = useDiffs();
+  const { diffId: routeDiffId } = useParams<{ diffId?: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+
+  const urlIdParam = searchParams.get('urlId');
+  const diffIdParam = searchParams.get('diffId');
+
+  const { data: diffsData, isLoading } = useDiffs(
+    urlIdParam ? { urlId: urlIdParam } : undefined
+  );
   const diffs = diffsData?.items ?? [];
 
   const { data: urlsData } = useUrls({ pageSize: 1000 });
   const urls = urlsData?.items ?? [];
 
-  const [selectedDiffId, setSelectedDiffId] = useState<string | null>(null);
+  const initialDiffId = routeDiffId || diffIdParam;
+  const [selectedDiffId, setSelectedDiffId] = useState<string | null>(initialDiffId || null);
   const [viewMode, setViewMode] = useState<'unified' | 'side-by-side' | 'json'>('unified');
 
-  const selectedDiff = diffs.find((d) => d.id === selectedDiffId) ?? null;
+  // Sync selected diff ID state with route/search parameters
+  useEffect(() => {
+    if (initialDiffId) {
+      setSelectedDiffId(initialDiffId);
+    } else if (diffs.length > 0 && !selectedDiffId) {
+      // Auto-select the first diff when loading the page
+      setSelectedDiffId(diffs[0].id);
+    }
+  }, [initialDiffId, diffs, selectedDiffId]);
+
+  // Fetch individual diff details to guarantee we have all content,
+  // especially if the diff isn't in the loaded list page.
+  const { data: fetchedDiff, isLoading: isDiffLoading } = useDiff(selectedDiffId ?? '');
+  const selectedDiff = fetchedDiff ?? diffs.find((d) => d.id === selectedDiffId) ?? null;
   const { data: aiSummaryData } = useDiffAiSummary(selectedDiffId ?? '');
 
   if (isLoading) {
@@ -200,46 +224,82 @@ export default function DiffsPage() {
         <div className="grid gap-4 lg:grid-cols-3">
           {/* List */}
           <div className="lg:col-span-1">
-            <div className="rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
-              <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+            <div className="rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800 overflow-hidden">
+              <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-gray-900 dark:text-white">All Diffs</h3>
+                <span className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded-full font-medium">
+                  {diffs.length}
+                </span>
               </div>
-              <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto dark:divide-gray-700">
+              
+              {/* Filters Banner */}
+              {urlIdParam && (
+                <div className="flex items-center justify-between bg-brand-50/50 dark:bg-brand-950/20 px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 text-xs">
+                  <span className="text-brand-700 dark:text-brand-300 font-medium truncate">
+                    Filtered by URL
+                  </span>
+                  <button
+                    onClick={() => {
+                      setSearchParams({});
+                    }}
+                    className="flex items-center gap-0.5 text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300 font-medium"
+                  >
+                    <X size={14} /> Clear Filter
+                  </button>
+                </div>
+              )}
+
+              <div className="divide-y divide-gray-100 max-h-[600px] overflow-y-auto dark:divide-gray-700">
                 {diffs.map((diff) => {
                   const urlObj = urls.find((u) => u.id === diff.urlId);
+                  const displayName = urlObj?.name || diff.urlName || 'Untitled URL';
+                  const displayUrl = urlObj?.url || diff.url;
+                  
                   return (
-                  <button
-                    key={diff.id}
-                    onClick={() => {
-                      setSelectedDiffId(diff.id);
-                    }}
-                    className={`w-full px-4 py-3 text-left transition-colors ${
-                      selectedDiffId === diff.id
-                        ? 'bg-brand-50 dark:bg-brand-900/20'
-                        : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
-                        Diff #{diff.id.substring(0, 8)}
-                      </p>
-                      <span className="text-xs text-gray-400">{formatRelative(diff.createdAt)}</span>
-                    </div>
-                    <p className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">
-                      {diff.diffType} • URL: {urlObj?.name || diff.urlId.substring(0, 8)}
-                    </p>
-                    {urlObj && (
-                      <div className="mt-1 flex items-center gap-1 text-xs text-brand-600 dark:text-brand-400 hover:underline">
-                        <ExternalLink size={12} />
-                        <a href={urlObj.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="truncate">
-                          {urlObj.url}
-                        </a>
+                    <button
+                      key={diff.id}
+                      onClick={() => {
+                        setSelectedDiffId(diff.id);
+                        navigate(`/diffs/${diff.id}${urlIdParam ? `?urlId=${urlIdParam}` : ''}`);
+                      }}
+                      className={`w-full px-4 py-3.5 text-left transition-colors flex flex-col gap-1 border-l-2 ${
+                        selectedDiffId === diff.id
+                          ? 'bg-brand-50/50 dark:bg-brand-900/10 border-l-brand-600'
+                          : 'hover:bg-gray-50 dark:hover:bg-gray-700/30 border-l-transparent'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white line-clamp-2 leading-tight">
+                          {displayName}
+                        </p>
+                        <span className="shrink-0 text-xs text-gray-400 font-medium">
+                          {formatRelative(diff.createdAt)}
+                        </span>
                       </div>
-                    )}
-                    {diff.summary && (
-                      <p className="mt-1 truncate text-xs text-gray-400 dark:text-gray-500">{diff.summary}</p>
-                    )}
-                  </button>
+
+                      <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                        <span className="font-mono bg-gray-100 dark:bg-gray-800/80 px-1 py-0.5 rounded text-[10px] text-gray-600 dark:text-gray-300">
+                          #{diff.id.substring(0, 8)}
+                        </span>
+                        <span>•</span>
+                        <span className="capitalize">{diff.diffType}</span>
+                      </div>
+
+                      {displayUrl && (
+                        <div className="flex items-center gap-1 text-xs text-brand-600 dark:text-brand-400">
+                          <ExternalLink size={12} className="shrink-0" />
+                          <span className="truncate hover:underline">
+                            {displayUrl}
+                          </span>
+                        </div>
+                      )}
+
+                      {diff.summary && (
+                        <p className="mt-1 truncate text-[11px] text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/40 px-1.5 py-0.5 rounded border border-gray-100 dark:border-gray-800/50">
+                          {diff.summary}
+                        </p>
+                      )}
+                    </button>
                   );
                 })}
               </div>
@@ -248,23 +308,33 @@ export default function DiffsPage() {
 
           {/* Detail */}
           <div className="lg:col-span-2">
-            {selectedDiff ? (
+            {isDiffLoading && !selectedDiff ? (
+              <div className="flex h-64 items-center justify-center rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+                <div className="text-center">
+                  <Loader2 size={24} className="animate-spin text-brand-500 mx-auto mb-2" />
+                  <span className="text-sm text-gray-500 dark:text-gray-400">Loading diff details...</span>
+                </div>
+              </div>
+            ) : selectedDiff ? (
               <div className="space-y-4">
                 {/* Selected URL Context */}
                 {(() => {
                   const urlObj = urls.find((u) => u.id === selectedDiff.urlId);
-                  if (!urlObj) return null;
+                  const name = urlObj?.name || selectedDiff.urlName || 'Untitled URL';
+                  const url = urlObj?.url || selectedDiff.url;
                   return (
                     <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
                       <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                        {urlObj.name}
+                        {name}
                       </h2>
-                      <div className="mt-1 flex items-center gap-1 text-sm text-brand-600 dark:text-brand-400 hover:underline">
-                        <ExternalLink size={14} />
-                        <a href={urlObj.url} target="_blank" rel="noopener noreferrer" className="truncate">
-                          {urlObj.url}
-                        </a>
-                      </div>
+                      {url && (
+                        <div className="mt-1 flex items-center gap-1 text-sm text-brand-600 dark:text-brand-400 hover:underline">
+                          <ExternalLink size={14} className="shrink-0" />
+                          <a href={url} target="_blank" rel="noopener noreferrer" className="truncate">
+                            {url}
+                          </a>
+                        </div>
+                      )}
                     </div>
                   );
                 })()}

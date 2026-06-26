@@ -114,7 +114,13 @@ export const authApi = {
 
 export const urlsApi = {
   list: async (params?: PaginationParams): Promise<PaginatedResponse<Url>> => {
-    const response = await api.get<{ data: any[]; pagination: any }>('/urls', { params });
+    const queryParams: any = {};
+    if (params) {
+      if (params.page !== undefined) queryParams.page = params.page;
+      if (params.pageSize !== undefined) queryParams.per_page = params.pageSize;
+      if (params.filter !== undefined) queryParams.filter = params.filter;
+    }
+    const response = await api.get<{ data: any[]; pagination: any }>('/urls', { params: queryParams });
     return {
       items: (response.data.data || []).map((item: any) => ({
         id: item.id,

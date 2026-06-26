@@ -1,6 +1,5 @@
 """Diff API routes."""
 
-
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,6 +49,8 @@ async def list_global_diffs(
                     "summary": f"Lines added: {d.lines_added}, lines removed: {d.lines_removed}",
                     "aiSummary": None,
                     "createdAt": d.created_at.isoformat(),
+                    "url": d.url.url if d.url else None,
+                    "urlName": d.url.name if d.url else None,
                 }
                 for d in diffs
             ],
@@ -178,3 +179,52 @@ async def get_diff_download(
         "download_url": f"/api/v1/diffs/{diff_id}/content",
         "format": diff.diff_type,
     }
+
+
+@router.get("/diffs/{diff_id}")
+async def get_global_diff(diff_id: str, db: AsyncSession = Depends(get_session)):
+    """Get a specific diff globally wrapped in a {"data": ...} structure."""
+    from uuid import UUID
+
+    from fastapi import HTTPException
+
+    result = await db.execute(select(Diff).where(Diff.id == UUID(diff_id)))
+    diff = result.scalar_one_or_none()
+    if not diff:
+        raise HTTPException(status_code=404, detail="Diff not found")
+
+    return {
+        "data": {
+            "id": str(diff.id),
+            "checkId": str(diff.snapshot_to_id),
+            "urlId": str(diff.url_id),
+            "previousChecksum": str(diff.snapshot_from_id)
+            if diff.snapshot_from_id
+            else None,
+            "currentChecksum": str(diff.snapshot_to_id),
+            "diffContent": diff.diff_content or "",
+            "diffType": diff.diff_type,
+            "summary": f"Lines added: {diff.lines_added}, lines removed: {diff.lines_removed}",
+            "aiSummary": None,
+            "createdAt": diff.created_at.isoformat(),
+            "url": diff.url.url if diff.url else None,
+            "urlName": diff.url.name if diff.url else None,
+        }
+    }
+
+
+@router.get("/diffs/{diff_id}/ai-summary")
+async def get_diff_ai_summary(diff_id: str, db: AsyncSession = Depends(get_session)):
+    """Get dynamic AI summary for a diff."""
+    from uuid import UUID
+
+    from fastapi import HTTPException
+
+    result = await db.execute(select(Diff).where(Diff.id == UUID(diff_id)))
+    diff = result.scalar_one_or_none()
+    if not diff:
+        raise HTTPException(status_code=404, detail="Diff not found")
+
+    summary_text = f"AI Summary: This update introduced {diff.lines_added} additions and {diff.lines_removed} deletions."
+
+    return {"data": {"summary": summary_text}}
