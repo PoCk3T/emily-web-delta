@@ -89,13 +89,13 @@ jobs:
       - name: Build & push backend image
         run: |
           IMAGE_TAG="${REGISTRY}/${PROJECT_ID}/${REPO}/emily-api:${{ github.sha }}"
-          docker build -t "$IMAGE_TAG" -f backend/Dockerfile .
+          docker build -t "$IMAGE_TAG" -f backend/Dockerfile backend/
           docker push "$IMAGE_TAG"
 
       - name: Build & push frontend image
         run: |
           IMAGE_TAG="${REGISTRY}/${PROJECT_ID}/${REPO}/emily-frontend:${{ github.sha }}"
-          docker build -t "$IMAGE_TAG" -f frontend/Dockerfile .
+          docker build -t "$IMAGE_TAG" -f frontend/Dockerfile frontend/
           docker push "$IMAGE_TAG"
 
   # ─── Deploy to Cloud Run ───
