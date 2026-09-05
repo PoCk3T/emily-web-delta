@@ -13,7 +13,9 @@ export function UrlForm({ onSubmit, onCancel, initialData, isSubmitting = false 
   const [url, setUrl] = useState(initialData?.url || '');
   const [name, setName] = useState(initialData?.name || '');
   const [description, setDescription] = useState(initialData?.description || '');
-  const [backend, setBackend] = useState<Backend>(initialData?.backend || 'firecrawl');
+  // "selfhosted" is the only backend the poller actually services; defaulting
+  // to Firecrawl silently created URLs that were never checked.
+  const [backend, setBackend] = useState<Backend>(initialData?.backend || 'selfhosted');
   const [checkInterval, setCheckInterval] = useState(initialData?.checkInterval || 30);
   const [tags, setTags] = useState(initialData?.tags?.join(', ') || '');
 
@@ -102,8 +104,8 @@ export function UrlForm({ onSubmit, onCancel, initialData, isSubmitting = false 
             onChange={(e) => setBackend(e.target.value as Backend)}
             className="mt-1 select"
           >
-            <option value="firecrawl">Firecrawl</option>
             <option value="selfhosted">Self-hosted</option>
+            <option value="firecrawl">Firecrawl (not polled)</option>
           </select>
         </div>
 

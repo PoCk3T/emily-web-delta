@@ -239,7 +239,7 @@ export const urlsApi = {
     };
   },
   check: async (id: string): Promise<CheckResult> => {
-    const response = await api.post<any>(`/urls/${id}/check`);
+    const response = await api.post<any>(`/urls/${id}/check-now`);
     return response.data;
   },
 };

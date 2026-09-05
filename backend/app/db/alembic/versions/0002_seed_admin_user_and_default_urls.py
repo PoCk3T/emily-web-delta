@@ -1,8 +1,22 @@
 """Seed admin user and default monitoring URLs.
 
-Populates the first admin user (emily@lclglaw.com) and six default
-monitored URLs (Terms of Service and Privacy Policy for OpenAI,
-Google/Gemini, and Anthropic). Idempotent — safe to run multiple times.
+Populates the first admin user (emily@lclglaw.com) and an initial set of
+monitored URLs. Idempotent — safe to run multiple times.
+
+    HISTORICAL SNAPSHOT — DO NOT EXTEND THIS LIST.
+
+    The DEFAULT_URLS below are frozen as of this revision and intentionally
+    no longer track the live list. ``backend/seed_user.py`` is the single
+    source of truth for monitored URLs; add new entries there and re-run the
+    seeder (see infra/gcp/DEVOPS_GUIDELINES.md §7).
+
+    Keeping a second, divergent copy here caused real drift: this file still
+    lacked URLs that had already been added to seed_user.py. Because the
+    deployment runbook applies `alembic stamp head` rather than running this
+    migration, editing it has no effect on production anyway.
+
+    tests/test_seed_urls.py asserts this list stays a subset of the live one,
+    so it can never resurrect stale or conflicting entries.
 
 Revision ID: 0002
 Revises: 0001

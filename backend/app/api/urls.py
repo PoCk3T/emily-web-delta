@@ -1,5 +1,6 @@
 """URL management API routes."""
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -10,9 +11,26 @@ from sqlalchemy.orm import selectinload
 
 from app.core.url_validator import validate_url
 from app.db.session import get_session
+from app.models.tenant import Tenant
 from app.models.url import Url
 
 router = APIRouter()
+
+# Only "selfhosted" URLs are picked up by the Celery poller
+# (see app/workers/polling.py::async_poll_urls).
+DEFAULT_BACKEND = "selfhosted"
+
+
+async def _default_tenant_id(db: AsyncSession) -> UUID | None:
+    """Resolve the tenant new URLs should belong to.
+
+    The deployment is effectively single-tenant, but leaving tenant_id NULL
+    orphans the row from the tenant's notification rules. Attach to the
+    first (oldest) tenant when one exists.
+    """
+    result = await db.execute(select(Tenant).order_by(Tenant.created_at.asc()).limit(1))
+    tenant = result.scalar_one_or_none()
+    return tenant.id if tenant else None
 
 
 class UrlCreateRequest(BaseModel):
@@ -20,7 +38,10 @@ class UrlCreateRequest(BaseModel):
     url: str
     interval_seconds: int = Field(default=3600, ge=60, le=86400)
     enabled: bool = True
-    backend: str = "firecrawl"
+    # Defaults to "selfhosted": it is the only backend the Celery poller
+    # actually services. A URL created as "firecrawl" is never polled because
+    # no Firecrawl monitor is provisioned anywhere in the codebase.
+    backend: str = DEFAULT_BACKEND
     headers: dict | None = None
     cookies: dict | None = None
     js_required: bool = False
@@ -61,6 +82,37 @@ class UrlResponse(BaseModel):
     snapshot_count: int = 0
 
 
+def _to_response(url: Url, *, snapshot_count: int | None = None) -> UrlResponse:
+    """Serialize a Url row.
+
+    Centralized so every endpoint returns an identical shape — previously
+    each handler rebuilt this by hand and they had already drifted apart
+    (e.g. create() always reported snapshot_count as 0).
+    """
+    if snapshot_count is None:
+        try:
+            snapshot_count = url.snapshot_count or 0
+        except Exception:
+            # snapshots relationship not eagerly loaded on this instance.
+            snapshot_count = 0
+
+    return UrlResponse(
+        id=str(url.id),
+        name=url.name,
+        url=url.url,
+        interval_seconds=url.interval_seconds,
+        enabled=url.enabled,
+        backend=url.backend,
+        last_checked=url.last_checked.isoformat() if url.last_checked else None,
+        last_hash=url.last_hash,
+        next_check=url.next_check.isoformat() if url.next_check else None,
+        tags=url.tags or [],
+        status="active" if url.enabled else "disabled",
+        created_at=url.created_at.isoformat(),
+        snapshot_count=snapshot_count,
+    )
+
+
 @router.post("/urls", response_model=UrlResponse, status_code=status.HTTP_201_CREATED)
 async def create_url(
     request: UrlCreateRequest, db: AsyncSession = Depends(get_session)
@@ -79,6 +131,7 @@ async def create_url(
         )
 
     url = Url(
+        tenant_id=await _default_tenant_id(db),
         name=request.name,
         url=request.url,
         interval_seconds=request.interval_seconds,
@@ -91,24 +144,16 @@ async def create_url(
         user_agent=request.user_agent,
         goal=request.goal,
         tags=request.tags,
+        # Schedule the first check immediately. Leaving this NULL relies on
+        # the scheduler's NULL handling and delays the first poll by a full
+        # interval; setting it explicitly makes new URLs verifiable at once.
+        next_check=datetime.now(UTC),
     )
     db.add(url)
     await db.commit()
     await db.refresh(url)
 
-    return UrlResponse(
-        id=str(url.id),
-        name=url.name,
-        url=url.url,
-        interval_seconds=url.interval_seconds,
-        enabled=url.enabled,
-        backend=url.backend,
-        last_checked=url.last_checked.isoformat() if url.last_checked else None,
-        last_hash=url.last_hash,
-        next_check=url.next_check.isoformat() if url.next_check else None,
-        tags=url.tags or [],
-        created_at=url.created_at.isoformat(),
-    )
+    return _to_response(url, snapshot_count=0)
 
 
 @router.get("/urls")
@@ -143,23 +188,7 @@ async def list_urls(
     urls = result.scalars().all()
 
     return {
-        "data": [
-            UrlResponse(
-                id=str(u.id),
-                name=u.name,
-                url=u.url,
-                interval_seconds=u.interval_seconds,
-                enabled=u.enabled,
-                backend=u.backend,
-                last_checked=u.last_checked.isoformat() if u.last_checked else None,
-                last_hash=u.last_hash,
-                next_check=u.next_check.isoformat() if u.next_check else None,
-                tags=u.tags or [],
-                created_at=u.created_at.isoformat(),
-                snapshot_count=u.snapshot_count or 0,
-            )
-            for u in urls
-        ],
+        "data": [_to_response(u) for u in urls],
         "pagination": {
             "page": page,
             "per_page": per_page,
@@ -182,20 +211,7 @@ async def get_url(url_id: UUID, db: AsyncSession = Depends(get_session)):
             status_code=status.HTTP_404_NOT_FOUND, detail="URL not found"
         )
 
-    return UrlResponse(
-        id=str(url.id),
-        name=url.name,
-        url=url.url,
-        interval_seconds=url.interval_seconds,
-        enabled=url.enabled,
-        backend=url.backend,
-        last_checked=url.last_checked.isoformat() if url.last_checked else None,
-        last_hash=url.last_hash,
-        next_check=url.next_check.isoformat() if url.next_check else None,
-        tags=url.tags or [],
-        created_at=url.created_at.isoformat(),
-        snapshot_count=url.snapshot_count or 0,
-    )
+    return _to_response(url)
 
 
 @router.put("/urls/{url_id}", response_model=UrlResponse)
@@ -224,20 +240,7 @@ async def update_url(
     await db.commit()
     await db.refresh(url)
 
-    return UrlResponse(
-        id=str(url.id),
-        name=url.name,
-        url=url.url,
-        interval_seconds=url.interval_seconds,
-        enabled=url.enabled,
-        backend=url.backend,
-        last_checked=url.last_checked.isoformat() if url.last_checked else None,
-        last_hash=url.last_hash,
-        next_check=url.next_check.isoformat() if url.next_check else None,
-        tags=url.tags or [],
-        created_at=url.created_at.isoformat(),
-        snapshot_count=url.snapshot_count or 0,
-    )
+    return _to_response(url)
 
 
 @router.delete("/urls/{url_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -287,9 +290,50 @@ async def disable_url(url_id: UUID, db: AsyncSession = Depends(get_session)):
     return {"enabled": False}
 
 
+class UrlToggleRequest(BaseModel):
+    enabled: bool
+
+
+@router.patch("/urls/{url_id}/toggle", response_model=UrlResponse)
+async def toggle_url(
+    url_id: UUID,
+    request: UrlToggleRequest,
+    db: AsyncSession = Depends(get_session),
+):
+    """Enable or disable URL monitoring, returning the full updated URL.
+
+    The web UI drives enable/disable through this single endpoint and expects
+    a complete URL object back so it can refresh its cache in place.
+    """
+
+    result = await db.execute(
+        select(Url).options(selectinload(Url.snapshots)).where(Url.id == url_id)
+    )
+    url = result.scalar_one_or_none()
+    if not url:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="URL not found"
+        )
+
+    url.enabled = request.enabled
+    if request.enabled and url.next_check is None:
+        # Re-enabling a never-scheduled URL should make it due immediately.
+        url.next_check = datetime.now(UTC)
+
+    await db.commit()
+    await db.refresh(url)
+
+    return _to_response(url)
+
+
 @router.post("/urls/{url_id}/check-now")
+@router.post("/urls/{url_id}/check")
 async def check_now(url_id: UUID, db: AsyncSession = Depends(get_session)):
-    """Trigger an immediate check for a URL."""
+    """Trigger an immediate check for a URL.
+
+    Exposed under both `/check-now` and `/check`; the web UI calls the
+    latter.
+    """
 
     result = await db.execute(select(Url).where(Url.id == url_id))
     url = result.scalar_one_or_none()
@@ -298,7 +342,9 @@ async def check_now(url_id: UUID, db: AsyncSession = Depends(get_session)):
             status_code=status.HTTP_404_NOT_FOUND, detail="URL not found"
         )
 
-    url.last_checked = None
+    # Mark the URL as due right now, so that even if the Celery dispatch
+    # below fails the next scheduler tick will still pick it up.
+    url.next_check = datetime.now(UTC)
     await db.commit()
 
     # Trigger immediate celery poll

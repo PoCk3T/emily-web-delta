@@ -1,4 +1,18 @@
-"""Seed a first admin user and default monitoring URLs."""
+"""Seed a first admin user and default monitoring URLs.
+
+This script is the source of truth for the monitored URL list and is safe to
+re-run. Its contract is deliberately *additive*:
+
+  * URLs in DEFAULT_URLS that do not exist yet are created.
+  * URLs that already exist are left alone apart from being tagged as seeded.
+    Their interval and schedule are never rewritten, so operator changes made
+    through the UI/API survive a re-seed.
+  * URLs added manually (not present in DEFAULT_URLS) are never touched or
+    removed.
+
+To add new URLs to the deployed system: append entries to DEFAULT_URLS, then
+re-run this script on the host (see infra/gcp/DEVOPS_GUIDELINES.md §7).
+"""
 
 import asyncio
 import sys
@@ -14,6 +28,20 @@ from app.db.session import async_session_factory, init_db
 from app.models.tenant import Tenant
 from app.models.url import Url
 from app.models.user import User
+
+# Tag applied to every URL managed by this script, so that manually added
+# URLs can be distinguished and left untouched.
+SEED_TAG = "seeded"
+
+# Default polling cadence for newly seeded URLs (2 hours).
+DEFAULT_INTERVAL_SECONDS = 7200
+
+# New URLs have their first check spread across this window so that a large
+# batch does not hit every origin at once on the first scheduler tick.
+STAGGER_WINDOW_SECONDS = 7200
+
+# Only "selfhosted" URLs are polled by the Celery worker.
+DEFAULT_BACKEND = "selfhosted"
 
 # Default URLs to monitor — Terms of Service & Privacy Policies
 DEFAULT_URLS = [
@@ -188,6 +216,243 @@ DEFAULT_URLS = [
         "url": "https://stripe.com/es/pricing",
         "tags": ["stripe", "pricing", "es"],
     },
+    # ─── PG&E — Tariffs, rate schedules, service terms & privacy ───
+    # NOTE: most PG&E rate schedules are published as PDFs. They are handled
+    # by app/core/pdf_parser.py; the HTML/readability path cannot parse them.
+    {
+        "name": "PG&E Tariffs Directory",
+        "url": "https://www.pge.com/tariffs/en.html",
+        "tags": ["pge", "tariffs", "directory"],
+    },
+    {
+        "name": "PG&E Electric Rate Schedule E-1 (Residential Services)",
+        "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-1.pdf",
+        "tags": ["pge", "tariffs", "electric", "residential", "pdf"],
+    },
+    {
+        "name": "PG&E Gas Rate Schedule G-1 (Residential Service)",
+        "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/GAS_SCHEDS_G-1.pdf",
+        "tags": ["pge", "tariffs", "gas", "residential", "pdf"],
+    },
+    {
+        "name": "PG&E Start/Stop/Transfer Service",
+        "url": "https://www.pge.com/en/account/service-requests/start-stop-transfer-service.html",
+        "tags": ["pge", "service"],
+    },
+    {
+        "name": "PG&E Gas Rate Schedule G-NR1 (Small Commercial)",
+        "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/GAS_SCHEDS_G-NR1.pdf",
+        "tags": ["pge", "tariffs", "gas", "commercial", "pdf"],
+    },
+    {
+        "name": "PG&E Gas Rate Schedule G-NR2 (Large Commercial)",
+        "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/GAS_SCHEDS_G-NR2.pdf",
+        "tags": ["pge", "tariffs", "gas", "commercial", "pdf"],
+    },
+    {
+        "name": "PG&E Electric Rate Schedule B-1 (Small General Service)",
+        "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_B-1.pdf",
+        "tags": ["pge", "tariffs", "electric", "commercial", "pdf"],
+    },
+    {
+        "name": "PG&E Electric Rate Schedule A-1 (Small General Service)",
+        "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_A-1.pdf",
+        "tags": ["pge", "tariffs", "electric", "commercial", "pdf"],
+    },
+    {
+        "name": "PG&E Electric Rate Schedule B-10 (Medium General Service)",
+        "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_B-10.pdf",
+        "tags": ["pge", "tariffs", "electric", "commercial", "pdf"],
+    },
+    {
+        "name": "PG&E Electric Rate Schedule E-19 (Medium Commercial TOU)",
+        "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-19.pdf",
+        "tags": ["pge", "tariffs", "electric", "commercial", "pdf"],
+    },
+    {
+        "name": "PG&E Electric Rate Schedule B-20 (Large Commercial Service)",
+        "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_B-20.pdf",
+        "tags": ["pge", "tariffs", "electric", "commercial", "pdf"],
+    },
+    {
+        "name": "PG&E Electric Rate Schedule E-20 (Large Commercial Service)",
+        "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_E-20.pdf",
+        "tags": ["pge", "tariffs", "electric", "commercial", "pdf"],
+    },
+    {
+        "name": (
+            "PG&E Form 79-716: General Terms and Conditions for Extension "
+            "& Service Construction"
+        ),
+        "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/GAS_FORMS_79-716.pdf",
+        "tags": ["pge", "tariffs", "gas", "forms", "tos", "pdf"],
+    },
+    {
+        "name": "PG&E Business Customer Service",
+        "url": "https://www.pge.com/en/business-resources/business-customer-service.html",
+        "tags": ["pge", "business", "service"],
+    },
+    {
+        "name": "PG&E Website Terms of Use & Disclosure",
+        "url": "https://www.pge.com/en/privacy-center/disclosure.html",
+        "tags": ["pge", "tos"],
+    },
+    {
+        "name": "PG&E Online Account Terms of Use",
+        "url": "https://myportal.pge.com/saphrportal/rules/TandC.html",
+        "tags": ["pge", "tos", "account"],
+    },
+    {
+        # Client-rendered SPA: a plain HTTP fetch returns an empty shell, so
+        # this must be rendered by CloakBrowser. Without js_required the
+        # snapshot would be blank yet hash consistently, hiding all changes.
+        "name": "PG&E Safety Action Center Terms of Service",
+        "url": "https://www.safetyactioncenter.pge.com/terms",
+        "tags": ["pge", "tos", "safety"],
+        "js_required": True,
+    },
+    {
+        "name": "PG&E Privacy Policy",
+        "url": "https://www.pge.com/en/privacy-center/privacy-policy.html",
+        "tags": ["pge", "privacy"],
+    },
+    # ─────────────────────────────────────────────────────────────────────
+    # Largest U.S. banks — retail consumer pricing, fees and disclosures.
+    #
+    # Tracking `utm_source` query parameters was deliberately dropped from
+    # these URLs: they do not change the document served, but they do become
+    # part of the stored URL and would make the same page unmatchable if it
+    # were ever added again without the parameter.
+    # ─────────────────────────────────────────────────────────────────────
+    # JPMorgan Chase & Co.
+    {
+        "name": "Chase Checking Accounts & Pricing",
+        "url": "https://personal.chase.com/personal/checking",
+        "tags": ["bank", "chase", "jpmorgan", "pricing", "fees"],
+    },
+    {
+        "name": "Chase Personal Disclosures & Interest Rates",
+        "url": "https://www.chase.com/digital/disclosures-and-interest-rates-personal",
+        "tags": ["bank", "chase", "jpmorgan", "disclosures", "rates"],
+    },
+    {
+        "name": "Chase Additional Banking Services and Fees",
+        "url": "https://www.chase.com/content/dam/chase-ux/documents/personal/checking/ABSF-en.pdf",
+        "tags": ["bank", "chase", "jpmorgan", "fees", "pdf"],
+    },
+    # Bank of America Corp.
+    {
+        "name": "Bank of America Advantage Banking",
+        "url": "https://www.bankofamerica.com/deposits/checking/advantage-banking/",
+        "tags": ["bank", "bankofamerica", "pricing", "fees"],
+    },
+    {
+        "name": "Bank of America Account Rates & Fees FAQs",
+        "url": "https://www.bankofamerica.com/deposits/account-rates-fees-faqs/",
+        "tags": ["bank", "bankofamerica", "rates", "fees"],
+    },
+    {
+        "name": "Bank of America Core Checking Clarity Statement",
+        "url": (
+            "https://www.bankofamerica.com/content/documents/deposits/service/pdf/"
+            "docrepo/BofA_CoreChecking_en_ADA.pdf"
+        ),
+        "tags": ["bank", "bankofamerica", "fees", "pdf"],
+    },
+    # Citigroup Inc. (Citibank)
+    {
+        "name": "Citi Simplified Banking Pricing",
+        "url": "https://www.citi.com/banking/simplifiedbanking",
+        "tags": ["bank", "citi", "citigroup", "pricing", "fees"],
+    },
+    {
+        "name": "Citi Relationship Tiers & Account Comparison",
+        "url": "https://www.citi.com/banking/compare-bank-accounts",
+        "tags": ["bank", "citi", "citigroup", "pricing", "comparison"],
+    },
+    {
+        # Redirects to the canonical www.citi.com CDN copy; the redirect is
+        # followed automatically and the PDF parser handles the result.
+        "name": "Citi Consumer Deposit Account Agreement",
+        "url": "https://online.citi.com/JRS/popups/ao/CDAA.pdf",
+        "tags": ["bank", "citi", "citigroup", "agreement", "fees", "pdf"],
+    },
+    # Wells Fargo & Co.
+    {
+        # Redirects to /mobile-online-banking/service-fees/.
+        "name": "Wells Fargo Consumer and Business Account Fees",
+        "url": "https://www.wellsfargo.com/online-banking/service-fees/",
+        "tags": ["bank", "wellsfargo", "fees"],
+    },
+    {
+        "name": "Wells Fargo Consumer Account Fees & Disclosures",
+        "url": "https://www.wellsfargo.com/mobile-online-banking/consumer-account-fees/",
+        "tags": ["bank", "wellsfargo", "fees", "disclosures"],
+    },
+    {
+        "name": "Wells Fargo Checking Account Comparison",
+        "url": "https://www.wellsfargo.com/checking/compare-checking-accounts/",
+        "tags": ["bank", "wellsfargo", "pricing", "comparison"],
+    },
+    # The Goldman Sachs Group, Inc. (Marcus)
+    #
+    # Marcus fronts these pages with bot protection: a plain httpx fetch is
+    # answered with HTTP 403 and a challenge page. CloakBrowser passes the
+    # challenge, so js_required is set to forbid the non-JS fallback rather
+    # than let a 403 challenge body be stored as if it were the real page.
+    {
+        "name": "Marcus by Goldman Sachs Savings Options",
+        "url": "https://www.marcus.com/us/en/savings",
+        "tags": ["bank", "marcus", "goldmansachs", "savings", "rates"],
+        "js_required": True,
+    },
+    {
+        "name": "Marcus Accessing Your Money",
+        "url": "https://www.marcus.com/us/en/banking-with-us/accessing-your-money",
+        "tags": ["bank", "marcus", "goldmansachs", "fees", "transfers"],
+        "js_required": True,
+    },
+    {
+        "name": "Marcus Banking FAQs",
+        "url": "https://www.marcus.com/us/en/faqs",
+        "tags": ["bank", "marcus", "goldmansachs", "faq", "fees"],
+        "js_required": True,
+    },
+    # Morgan Stanley (E*TRADE / Morgan Stanley Private Bank)
+    {
+        "name": "E*TRADE / Morgan Stanley Private Bank Rates & Fees",
+        "url": "https://us.etrade.com/bank/bank-rates",
+        "tags": ["bank", "morganstanley", "etrade", "rates", "fees"],
+    },
+    {
+        "name": "E*TRADE Pricing and Rates",
+        "url": "https://us.etrade.com/what-we-offer/pricing-and-rates",
+        "tags": ["bank", "morganstanley", "etrade", "pricing", "fees"],
+    },
+    {
+        "name": "Morgan Stanley Wealth Management Disclosures",
+        "url": "https://www.morganstanley.com/wealth-disclosures/disclosures",
+        "tags": ["bank", "morganstanley", "disclosures", "wealth"],
+    },
+    # U.S. Bancorp (U.S. Bank)
+    {
+        "name": "U.S. Bank Consumer Pricing Information",
+        "url": (
+            "https://www.usbank.com/dam/en/documents/pdfs/disclosures/"
+            "consumer-pricing-information.pdf"
+        ),
+        "tags": ["bank", "usbank", "usbancorp", "pricing", "fees", "pdf"],
+    },
+    {
+        "name": "U.S. Bank Smartly Checking",
+        "url": "https://www.usbank.com/bank-accounts/checking-accounts/bank-smartly-checking.html",
+        "tags": ["bank", "usbank", "usbancorp", "pricing", "fees"],
+    },
+    {
+        "name": "U.S. Bank Smart Rewards",
+        "url": "https://www.usbank.com/bank-accounts/checking-accounts/smart-rewards.html",
+        "tags": ["bank", "usbank", "usbancorp", "rewards", "fees"],
+    },
 ]
 
 
@@ -227,74 +492,93 @@ async def seed_user(force_seed=False):
             print(f"User ID: {user.id}")
             print("Password: emilyadmin123")
 
-        # Seed default URLs — always normalize to DEFAULT_URLS list
-        # This ensures we have all current defaults, even if old runs had fewer
+        # ─── Seed default URLs (additive, non-destructive) ───
         tenant_result = await db.execute(select(Tenant).where(Tenant.name == "Emily"))
         tenant = tenant_result.scalar_one_or_none()
-        created_count = 0
-        updated_count = 0
         if not tenant:
             print("No tenant found — skipping URL seeding")
-        else:
-            existing_urls = await db.execute(
-                select(Url).where(Url.tenant_id == tenant.id)
+            return
+
+        # Load every URL, not just this tenant's. URLs created through the API
+        # before tenant attachment was fixed have a NULL tenant_id, and the
+        # `urls.url` column is globally unique in practice — scoping the
+        # lookup to one tenant would re-insert them as duplicates.
+        # Materialize once: a Result can only be consumed a single time.
+        existing_rows = (await db.execute(select(Url))).scalars().all()
+        existing_by_url = {u.url: u for u in existing_rows}
+
+        seeded_rows = [u for u in existing_rows if SEED_TAG in (u.tags or [])]
+        manual_rows = [u for u in existing_rows if SEED_TAG not in (u.tags or [])]
+
+        # Detect duplicates inside DEFAULT_URLS itself before touching the DB.
+        seen: set[str] = set()
+        duplicates = set()
+        for entry in DEFAULT_URLS:
+            if entry["url"] in seen:
+                duplicates.add(entry["url"])
+            seen.add(entry["url"])
+        if duplicates:
+            raise SystemExit(
+                "DEFAULT_URLS contains duplicate entries: "
+                + ", ".join(sorted(duplicates))
             )
-            existing_url_map = {u.url: u for u in existing_urls.scalars().all()}
 
-            # Track which URLs are "seeded" vs "manually added"
-            SEED_TAG = "seeded"
-            all_seeded = {
-                u for u in existing_urls.scalars().all() if SEED_TAG in (u.tags or [])
-            }
-            existing_seeded_map = {u.url: u for u in all_seeded}
-            manual_added = {
-                u.url: u for u in existing_urls.scalars().all() if u not in all_seeded
-            }
+        new_entries = [e for e in DEFAULT_URLS if e["url"] not in existing_by_url]
 
-            # Calculate spacing for staggered initial checks
-            # 7200 seconds (2 hours) spread across all DEFAULT_URLS
-            stagger_interval = 7200 // len(DEFAULT_URLS)
-            now = datetime.now(UTC)
+        # Stagger ONLY the newly added URLs across the window. Deriving the
+        # spacing from the full DEFAULT_URLS list (and rewriting next_check on
+        # every existing row) used to reshuffle the entire schedule and reset
+        # operator interval changes each time a single URL was added.
+        now = datetime.now(UTC)
+        spacing = (
+            STAGGER_WINDOW_SECONDS // len(new_entries) if new_entries else 0
+        )
 
-            for idx, entry in enumerate(DEFAULT_URLS):
-                next_check_time = now + timedelta(seconds=idx * stagger_interval)
+        created_count = 0
+        retagged_count = 0
 
-                if entry["url"] in existing_url_map:
-                    # Update existing URL's interval and stagger check
-                    url = existing_url_map[entry["url"]]
-                    url.interval_seconds = 7200
-                    url.next_check = next_check_time
-                    # Mark as seeded if not already
-                    if SEED_TAG not in (url.tags or []):
-                        url.tags = (url.tags or []) + [SEED_TAG]
-                    db.add(url)
-                    updated_count += 1
-                    continue
-
-                url = Url(
+        for idx, entry in enumerate(new_entries):
+            db.add(
+                Url(
                     tenant_id=tenant.id,
                     name=entry["name"],
                     url=entry["url"],
-                    backend="selfhosted",
-                    interval_seconds=7200,
+                    backend=entry.get("backend", DEFAULT_BACKEND),
+                    interval_seconds=entry.get(
+                        "interval_seconds", DEFAULT_INTERVAL_SECONDS
+                    ),
                     enabled=True,
-                    tags=entry["tags"] + [SEED_TAG],
-                    next_check=next_check_time,
+                    js_required=entry.get("js_required", False),
+                    tags=list(entry["tags"]) + [SEED_TAG],
+                    next_check=now + timedelta(seconds=idx * spacing),
                 )
-                db.add(url)
-                created_count += 1
+            )
+            created_count += 1
 
-            if created_count or updated_count:
-                await db.commit()
-                print(
-                    f"\nSeeded {created_count} new default URLs ({updated_count} updated)"
-                )
-            else:
-                print(
-                    f"\nAll {len(DEFAULT_URLS)} default URLs already exist ({updated_count} verified)"
-                )
+        # Existing rows are only ever *tagged*, never rescheduled or retimed.
+        for entry in DEFAULT_URLS:
+            url = existing_by_url.get(entry["url"])
+            if url is not None and SEED_TAG not in (url.tags or []):
+                url.tags = list(url.tags or []) + [SEED_TAG]
+                db.add(url)
+                retagged_count += 1
+
+        if created_count or retagged_count:
+            await db.commit()
+
+        print(
+            f"\nURL seeding complete:"
+            f"\n  defaults defined     : {len(DEFAULT_URLS)}"
+            f"\n  created (new)        : {created_count}"
+            f"\n  already present      : {len(DEFAULT_URLS) - created_count}"
+            f"\n  newly tagged seeded  : {retagged_count}"
+            f"\n  previously seeded    : {len(seeded_rows)}"
+            f"\n  manual (untouched)   : {len(manual_rows)}"
+        )
+        if created_count:
             print(
-                f"Manual/additional URLs: {len(manual_added)} (not affected by seeding)"
+                f"  first checks staggered over "
+                f"{spacing * max(created_count - 1, 0) // 60} min"
             )
 
 

@@ -31,6 +31,7 @@ async def async_poll_single_url(db, url: Url) -> CheckResult:
         url=url.url,
         headers=url.headers,
         cookies=url.cookies,
+        js_required=bool(url.js_required),
     )
 
     now = datetime.now(UTC)
@@ -97,6 +98,10 @@ async def async_poll_single_url(db, url: Url) -> CheckResult:
 
     new_snapshot = None
 
+    # PDF sources store plain text rather than markup; carry the real type
+    # through so the UI renders diffs correctly.
+    snapshot_content_type = result.metadata.get("content_type", "markdown")
+
     if not last_snapshot:
         # First check, treat as "new"
         status = "new"
@@ -105,7 +110,7 @@ async def async_poll_single_url(db, url: Url) -> CheckResult:
             content_hash=result.content_hash,
             content=result.content,
             extracted_text=result.content,
-            content_type="markdown",
+            content_type=snapshot_content_type,
             status="ok",
             snapshot_size=len(result.content),
         )
@@ -123,7 +128,7 @@ async def async_poll_single_url(db, url: Url) -> CheckResult:
             content_hash=result.content_hash,
             content=result.content,
             extracted_text=result.content,
-            content_type="markdown",
+            content_type=snapshot_content_type,
             status="ok",
             snapshot_size=len(result.content),
         )
@@ -197,13 +202,16 @@ async def async_poll_single_url(db, url: Url) -> CheckResult:
 
 async def trigger_notifications_for_url(db, url: Url, message: str):
     """Check notification rules and dispatch alerts."""
+    # NOTE: `.is_(None)` is required here for the same reason as in
+    # async_poll_urls — `url_id is None` is a Python identity test that folds
+    # to False and silently disables every tenant-wide (url_id = NULL) rule.
     stmt = select(NotificationRule).where(
-        NotificationRule.enabled,
+        NotificationRule.enabled.is_(True),
         or_(
             NotificationRule.url_id == url.id,
             and_(
                 NotificationRule.tenant_id == url.tenant_id,
-                NotificationRule.url_id is None,
+                NotificationRule.url_id.is_(None),
             ),
         ),
     )
@@ -246,10 +254,15 @@ async def async_poll_urls(url_ids: list[str] | None = None) -> dict:
                 logger.info(
                     "Scheduler poll triggered. Checking due self-hosted URLs..."
                 )
+                # NOTE: must use `.is_(None)`, NOT `is None`. The latter is a
+                # Python identity test that evaluates to the constant False at
+                # import time, which silently collapses this OR into
+                # `next_check <= now` and makes every freshly-created URL
+                # (next_check = NULL) invisible to the scheduler forever.
                 stmt = select(Url).where(
-                    Url.enabled,
+                    Url.enabled.is_(True),
                     Url.backend == "selfhosted",
-                    or_(Url.next_check is None, Url.next_check <= now),
+                    or_(Url.next_check.is_(None), Url.next_check <= now),
                 )
 
             res = await db.execute(stmt)
